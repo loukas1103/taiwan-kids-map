@@ -26,6 +26,12 @@ st.sidebar.header("📍 位置與篩選")
 search_address = st.sidebar.text_input("🏠 輸入你的起點地址", placeholder="例如：新北市新店區北新路一段...")
 user_coords = None
 
+if st.sidebar.button("🔄 同步最新雲端資料"):
+    with st.spinner("同步中..."):
+        from sync_data import sync_from_google_sheets
+        sync_from_google_sheets()
+        st.success("同步完成！請重新整理網頁。")
+        
 if search_address:
     try:
         # 使用 Nominatim 進行地理編碼
