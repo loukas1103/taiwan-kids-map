@@ -23,15 +23,9 @@ df = load_data()
 st.sidebar.header("📍 位置與篩選")
 
 # 1. 起點改為輸入地址
-search_address = st.sidebar.text_input("🏠 輸入你的起點地址", placeholder="例如：新北市新店區北新路一段...")
+search_address = st.sidebar.text_input("🏠 輸入你的地標或地址", placeholder="例如：新北市新店區北新路一段...")
 user_coords = None
-
-if st.sidebar.button("🔄 同步最新雲端資料"):
-    with st.spinner("同步中..."):
-        from sync_data import sync_from_google_sheets
-        sync_from_google_sheets()
-        st.success("同步完成！請重新整理網頁。")
-        
+    
 if search_address:
     try:
         # 使用 Nominatim 進行地理編碼
@@ -59,6 +53,12 @@ city_choice = st.sidebar.multiselect(
 # 3. 關鍵字搜尋
 search_query = st.sidebar.text_input("🔎 搜尋景點關鍵字")
 
+if st.sidebar.button("🔄 同步最新雲端資料"):
+    with st.spinner("同步中..."):
+        from sync_data import sync_from_google_sheets
+        sync_from_google_sheets()
+        st.success("同步完成！請重新整理網頁。")
+        
 # --- 資料處理邏輯 ---
 
 # 過濾條件
