@@ -1,7 +1,6 @@
 import streamlit as st
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-def sync_from_google_sheets():
 import pandas as pd
 from geopy.geocoders import Nominatim
 import time
