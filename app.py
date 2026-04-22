@@ -5,129 +5,80 @@ from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
 
-st.set_page_config(page_title="台灣親子旅遊地圖", layout="wide")
-st.title("👨‍👩‍👧‍👦 台灣親子旅遊景點查詢")
+# 設定頁面配置為寬螢幕
+st.set_page_config(layout="wide", page_title="台灣親子旅遊搜尋器")
 
-# 讀取資料
+# --- 模擬景點數據 (實際應用可讀取 CSV 或資料庫) ---
 @st.cache_data
-def load_data():
-    try:
-        # 請確保你的 locations.csv 檔案與此程式在同一資料夾
-        return pd.read_csv('locations.csv')
-    except:
-        return pd.DataFrame(columns=['名稱', '城市', '類型', '分齡', 'lat', 'lon', '介紹'])
+def get_poi_data():
+    data = {
+        "名稱": ["台北市立動物園", "新竹綠世界", "台中科博館", "高雄駁二", "桃園Xpark"],
+        "縣市": ["台北市", "新竹縣", "台中市", "高雄市", "桃園市"],
+        "緯度": [24.9983, 24.6974, 24.1533, 22.6199, 25.0125],
+        "經度": [121.5810, 121.0694, 120.6660, 120.2815, 121.2165]
+    }
+    return pd.DataFrame(data)
 
-df = load_data()
+poi_df = get_poi_data()
 
-# --- 側邊欄設計 ---
-st.sidebar.header("📍 位置與篩選")
+# --- 側邊欄：搜尋條件 (需求 1 & 2) ---
+st.sidebar.header("🔍 搜尋設定")
+target_address = st.sidebar.text_input("1. 輸入您的位置 (地址或地標)", "台北車站")
+city_filter = st.sidebar.selectbox("2. 選擇縣市", ["全部"] + list(poi_df["縣市"].unique()))
+keyword = st.sidebar.text_input("3. 景點關鍵字搜尋")
 
-# 1. 起點改為輸入地址
-search_address = st.sidebar.text_input("🏠 輸入你的地標或地址", placeholder="例如：新北市新店區北新路一段...")
-user_coords = None
+# 定位目標座標
+geolocator = Nominatim(user_agent="taiwan_kids_travel_app")
+try:
+    location = geolocator.geocode(target_address)
+    if location:
+        center_coords = (location.latitude, location.longitude)
+    else:
+        center_coords = (25.0478, 121.5170) # 預設台北車站
+except:
+    center_coords = (25.0478, 121.5170)
+
+# --- 資料篩選邏輯 ---
+filtered_df = poi_df.copy()
+if city_filter != "全部":
+    filtered_df = filtered_df[filtered_df["縣市"] == city_filter]
+if keyword:
+    filtered_df = filtered_df[filtered_df["名稱"].str.contains(keyword)]
+
+# 計算距離 (需求 4)
+def calc_dist(row):
+    return round(geodesic(center_coords, (row["緯度"], row["經度"])).km, 2)
+
+filtered_df["距離(km)"] = filtered_df.apply(calc_dist, axis=1)
+filtered_df = filtered_df.sort_values("距離(km)")
+
+# --- 網頁佈局 ---
+col_map, col_info = st.columns([2, 1]) # 中間地圖佔2份，右側資訊佔1份
+
+with col_map:
+    st.subheader("🗺️ 景點地圖")
+    # 建立地圖 (需求 3)
+    m = folium.Map(location=center_coords, zoom_start=12)
     
-if search_address:
-    try:
-        # 使用 Nominatim 進行地理編碼
-        geolocator = Nominatim(user_agent="taiwan_kids_app_v2")
-        location = geolocator.geocode(search_address)
-        if location:
-            user_coords = (location.latitude, location.longitude)
-            st.sidebar.success(f"已定位：{search_address}")
-        else:
-            st.sidebar.error("找不到該地址，請輸入更詳細的地址資訊。")
-    except:
-        st.sidebar.warning("地址服務忙碌中，請稍後再試。")
-
-# 2. 縣市選擇：預設只顯示台北市與新北市
-all_cities = sorted(df['城市'].unique())
-# 找出存在於資料中且屬於雙北的選項
-default_cities = [c for c in all_cities if c in ['台北市', '新北市']]
-
-city_choice = st.sidebar.multiselect(
-    "選擇縣市", 
-    options=all_cities, 
-    default=default_cities
-)
-
-# 3. 關鍵字搜尋
-search_query = st.sidebar.text_input("🔎 搜尋景點關鍵字")
-
-if st.sidebar.button("🔄 同步最新雲端資料"):
-    with st.spinner("同步中..."):
-        from sync_data import sync_from_google_sheets
-        sync_from_google_sheets()
-        st.success("同步完成！請重新整理網頁。")
-        
-# --- 資料處理邏輯 ---
-
-# 過濾條件
-filtered_df = df[
-    (df['城市'].isin(city_choice)) & 
-    (df['名稱'].str.contains(search_query, na=False))
-].copy()
-
-# 計算距離並排序
-if user_coords:
-    distances = []
-    for idx, row in filtered_df.iterrows():
-        dest = (row['lat'], row['lon'])
-        dist = geodesic(user_coords, dest).km
-        distances.append(round(dist, 1))
-    filtered_df['距離(km)'] = distances
-    filtered_df = filtered_df.sort_values(by='距離(km)')
-
-# --- 畫面配置 ---
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    st.subheader("🗺️ 互動地圖 (點擊標記查看介紹)")
+    # 紅色圖釘：中心點
+    folium.Marker(
+        center_coords, 
+        popup=f"您的位置: {target_address}", 
+        icon=folium.Icon(color="red", icon="info-sign")
+    ).add_to(m)
     
-    # 地圖中心邏輯
-    map_center = user_coords if user_coords else [25.03, 121.5] # 預設中心在台北
-    zoom_val = 13 if user_coords else 11
-    m = folium.Map(location=map_center, zoom_start=zoom_val)
-    
-    # 標記起點地址 (紅色)
-    if user_coords:
+    # 藍色圖釘：周邊景點
+    for _, row in filtered_df.iterrows():
         folium.Marker(
-            user_coords, 
-            popup="我的位置", 
-            icon=folium.Icon(color='red', icon='home')
+            [row["緯度"], row["經度"]],
+            popup=f"{row['名稱']} ({row['距離(km)']} km)",
+            icon=folium.Icon(color="blue", icon="cloud")
         ).add_to(m)
     
-    # 標記景點 (藍色)
-    for idx, row in filtered_df.iterrows():
-        # 製作彈出視窗的內容 (支援 HTML)
-        popup_html = f"""
-            <div style='width: 200px;'>
-                <h4>{row['名稱']}</h4>
-                <p><b>介紹：</b>{row['介紹']}</p>
-                <p><b>分齡：</b>{row['分齡']}</p>
-            </div>
-        """
-        folium.Marker(
-            [row['lat'], row['lon']], 
-            popup=folium.Popup(popup_html, max_width=250),
-            tooltip=row['名稱'],
-            icon=folium.Icon(color='blue', icon='info-sign')
-        ).add_to(m)
-        
-    st_folium(m, width=700, height=600, key="main_map")
+    st_folium(m, width=800, height=600)
 
-with col2:
-    st.subheader("📋 景點清單")
-    if not user_coords:
-        st.info("💡 輸入地址後可依距離排序")
-
-    for idx, row in filtered_df.iterrows():
-        display_title = f"📍 {row['名稱']}"
-        if user_coords:
-            display_title += f" ({row['距離(km)']} km)"
-            
-        with st.expander(display_title):
-            st.write(f"**分類：** {row['類型']}")
-            st.write(f"**適合年齡：** {row['分齡']}")
-            st.write(row['介紹'])
-            nav_url = f"https://www.google.com/maps/dir/?api=1&destination={row['lat']},{row['lon']}"
-            st.markdown(f"[🚗 開啟 Google 地圖導航]({nav_url})")
+with col_info:
+    st.subheader("📋 景點列表")
+    st.write(f"中心點：{target_address}")
+    # 顯示搜尋結果 (需求 4)
+    st.dataframe(filtered_df[["名稱", "縣市", "距離(km)"]], use_container_width=True)
