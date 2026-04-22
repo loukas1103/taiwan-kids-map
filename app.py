@@ -79,3 +79,21 @@ with col_map:
     for _, row in filtered_df.iterrows():
         popup_content = f"<b>{row['名稱']}</b><br><br>{row['介紹']}<br><br>距離：{row['距離(km)']} km"
         folium.Marker(
+            [row["緯度"], row["經度"]],
+            popup=folium.Popup(popup_content, max_width=300),
+            tooltip=row["名稱"],
+            icon=folium.Icon(color="blue", icon="info-sign")
+        ).add_to(m)
+    
+    st_folium(m, width="100%", height=600)
+
+with col_info:
+    st.subheader("📋 景點列表")
+    # 僅顯示名稱、縣市與距離 (不顯示介紹)
+    display_df = filtered_df[["名稱", "縣市", "距離(km)"]]
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    
+    if filtered_df.empty:
+        st.info("無符合條件的景點。")
+    else:
+        st.caption(f"已找到 {len(filtered_df)} 個景點，依距離排序。")
