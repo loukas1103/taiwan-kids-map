@@ -3,6 +3,7 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
+from sync_data import sync_from_google_sheets
 from geopy.distance import geodesic
 
 st.set_page_config(page_title="台灣親子旅遊地圖", layout="wide")
