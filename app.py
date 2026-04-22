@@ -55,9 +55,9 @@ search_query = st.sidebar.text_input("🔎 搜尋景點關鍵字")
 
 if st.sidebar.button("🔄 同步最新雲端資料"):
     with st.spinner("同步中..."):
-        from sync_data import sync_from_google_sheets
-        sync_from_google_sheets()
-        st.success("同步完成！請重新整理網頁。")
+        sync_from_google_sheets() # 執行同步
+        st.cache_data.clear()    # 這行一定要加，強制清除快取
+        st.rerun()               # 這行強制網頁重新導向並讀取新資料
         
 # --- 資料處理邏輯 ---
 
