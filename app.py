@@ -18,7 +18,7 @@ def load_all_data():
     # --- 方法 A: 政府資料開放平台 (需求 1) ---
     # 使用觀光署觀光資訊 API (範例使用 JSON 格式)
     try:
-        gov_url = "https://gis.taiwan.net.tw/XMLReleaseALL_ASPX/hotel_C_f.json" # 這裡以景點 API 為例
+        gov_url = "https://media.taiwan.net.tw/XMLReleaseALL_public/scenic_spot_C_f.json" # 這裡以景點 API 為例
         # 註：實際 API URL 請根據政府平台最新路徑替換
         response = requests.get(gov_url, timeout=10)
         gov_data = response.json()
