@@ -3,6 +3,7 @@ import pandas as pd
 import folium
 import requests
 import xml.etree.ElementTree as ET # 需在檔案最上方 import
+import urllib3 # 需在檔案上方 import，用來消除警告 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
@@ -20,7 +21,8 @@ def load_all_data():
     try:
         # 使用觀光署提供的 XML 網址 (範例：全台觀光景點資料)
         gov_url = "https://media.taiwan.net.tw/XMLReleaseALL_public/scenic_spot_C_f.xml"
-        response = requests.get(gov_url, timeout=15)
+        response = requests.get(gov_url, timeout=15, verify=False)
+        # response = requests.get(gov_url, timeout=15)
         response.encoding = 'utf-8' # 強制設定編碼防止亂碼
         
         # 解析 XML 內容
