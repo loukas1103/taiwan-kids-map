@@ -102,6 +102,23 @@ def calc_dist(row):
 if not filtered_df.empty:
     filtered_df["距離(km)"] = filtered_df.apply(calc_dist, axis=1)
     filtered_df = filtered_df.sort_values("距離(km)")
+    
+# 在顯示地圖的區域
+for _, row in filtered_df.iterrows():
+    try:
+        # 強制轉型為 float
+        lat = float(row["緯度"])
+        lng = float(row["經度"])
+        
+        popup_text = f"<b>{row['名稱']}</b><br>{row['介紹']}"
+        folium.Marker(
+            [lat, lng],
+            popup=folium.Popup(popup_text, max_width=250),
+            icon=folium.Icon(color="blue", icon="info-sign")
+        ).add_to(m)
+    except (ValueError, TypeError):
+        # 如果該列資料無法轉為數字，就跳過不畫
+        continue
 
 # --- 3. 畫面顯示 ---
 col_map, col_info = st.columns([2, 1])
