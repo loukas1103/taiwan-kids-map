@@ -19,7 +19,7 @@ def load_all_data():
     # --- 方法 A: 政府資料開放平台 (改為 XML 匯入) ---
     try:
         # 使用觀光署提供的 XML 網址 (範例：全台觀光景點資料)
-        gov_url = "https://gis.taiwan.net.tw/XMLReleaseALL_ASPX/scenic_spot_C_f.xml"
+        gov_url = "https://media.taiwan.net.tw/XMLReleaseALL_public/scenic_spot_C_f.xml"
         response = requests.get(gov_url, timeout=15)
         response.encoding = 'utf-8' # 強制設定編碼防止亂碼
         
