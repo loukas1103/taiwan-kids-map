@@ -128,13 +128,16 @@ with col_map:
     m = folium.Map(location=center_coords, zoom_start=12)
     folium.Marker(center_coords, popup="我的位置", icon=folium.Icon(color="red")).add_to(m)
     
+if not filtered_df.empty:
     for _, row in filtered_df.iterrows():
-        popup_text = f"<b>{row['名稱']}</b><br>{row['介紹']}"
-        folium.Marker(
-            [row["緯度"], row["經度"]],
-            popup=folium.Popup(popup_text, max_width=250),
-            icon=folium.Icon(color="blue", icon="info-sign")
-        ).add_to(m)
+        # 加上我們之前的防錯機制：檢查經緯度
+        if pd.notna(row["緯度"]) and pd.notna(row["經度"]):
+            popup_text = f"<b>{row['名稱']}</b><br>{row['介紹']}"
+            folium.Marker(
+                [float(row["緯度"]), float(row["經度"])],
+                popup=folium.Popup(popup_text, max_width=250),
+                icon=folium.Icon(color="blue", icon="info-sign")
+            ).add_to(m)
     st_folium(m, width="100%", height=600)
 
 with col_info:
