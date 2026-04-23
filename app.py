@@ -29,12 +29,18 @@ def load_all_data():
         
         for info in root.findall(".//Info"):
             try:
+                # 1. 取得原始地址並先去除首尾空格/換行 (這是關鍵！)
+                raw_address = info.find('Add').text if info.find('Add') is not None else ""
+                clean_address = raw_address.strip() 
+                # 2. 擷取縣市名稱 (前三碼)
+                city = clean_address[0:3] if clean_address else "其他"
+                # 3. 抓取經緯度
                 px = info.find('Px').text # 經度
                 py = info.find('Py').text # 緯度
                 if px and py:
                     all_pois.append({
                         "名稱": info.find('Name').text if info.find('Name') is not None else "未知景點",
-                        "縣市": (info.find('Add').text[0:3]) if info.find('Add') is not None else "其他",
+                        "縣市": city, # 這是乾淨的「臺北市」
                         "介紹": (info.find('Description').text[:100] + "...") if info.find('Description') is not None else "暫無介紹",
                         "緯度": float(py),
                         "經度": float(px)
