@@ -55,7 +55,7 @@ def load_all_data():
 
     # --- 方法 B: Google 表單試算表 (需求 2) ---
     # 請將下方網址替換為你「發佈到網路」的 CSV 網址
-    SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/您的ID/pub?output=csv"
+    SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSTCgMNKX0_D5fre8tFYOE32i_9ikAwx7yOlz5nl0fMbhPVfIQHU32-l2y_jUe1mAInQhlB0ia_A6hy/pub?output=csv"
     try:
         sheet_df = pd.read_csv(SHEET_CSV_URL)
         # 確保試算表欄位名稱與程式一致
