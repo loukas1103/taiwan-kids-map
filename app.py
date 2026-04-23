@@ -156,14 +156,10 @@ with col_info:
     st.subheader("📋 景點列表")
     if not filtered_df.empty:
         st.dataframe(filtered_df[["名稱", "縣市", "距離(km)"]], use_container_width=True, hide_index=True)
+    else:
+        st.info("目前無資料，請嘗試調整搜尋條件。")
 
 # --- 除錯看板 (若臺北市還是 0 筆，請看這裡) ---
 st.divider()
 st.write("### 🛠️ 系統除錯資訊")
 st.write(f"資料庫總筆數: {len(poi_df)}")
-
-
-
-    
-    else:
-        st.info("目前無資料，請嘗試調整搜尋條件。")
