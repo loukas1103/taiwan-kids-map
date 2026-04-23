@@ -4,6 +4,7 @@ import folium
 import requests
 import xml.etree.ElementTree as ET
 import urllib3
+import re
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
@@ -11,124 +12,149 @@ from geopy.distance import geodesic
 # 消除 SSL 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-st.set_page_config(layout="wide", page_title="全台親子旅遊地圖 V11")
+# 設定頁面配置
+st.set_page_config(layout="wide", page_title="全台親子旅遊自動化查詢站")
 
-# --- 1. 資料解析核心 (修正座標欄位) ---
+# --- 1. 資料匯入與強效標準化邏輯 ---
 @st.cache_data(ttl=3600)
-def load_all_data(version="v11"):
+def load_all_data():
     all_pois = []
-    stats = {"total_read": 0, "skipped_no_coords": 0, "taipei_count": 0}
     
+    # 標準縣市清單
+    STANDARD_CITIES = [
+        "臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市", 
+        "基隆市", "新竹縣", "新竹市", "苗栗縣", "彰化縣", "南投縣", 
+        "雲林縣", "嘉義縣", "嘉義市", "屏東縣", "宜蘭縣", "花蓮縣", 
+        "臺東縣", "澎湖縣", "金門縣", "連江縣"
+    ]
+
+    # --- 方法 A: 政府 XML 資料 ---
     try:
-        # 政府觀光開放平台 XML
         gov_url = "https://media.taiwan.net.tw/XMLReleaseALL_public/scenic_spot_C_f.xml"
-        response = requests.get(gov_url, timeout=30, verify=False)
+        response = requests.get(gov_url, timeout=15, verify=False)
         response.encoding = 'utf-8'
         root = ET.fromstring(response.content)
         
         for info in root.findall(".//Info"):
-            stats["total_read"] += 1
             try:
-                name = info.find('Name').text.strip() if info.find('Name') is not None else ""
+                # 取得名稱與地址
+                name = info.find('Name').text.strip() if info.find('Name') is not None else "未知景點"
                 raw_add = info.find('Add').text.strip() if info.find('Add') is not None else ""
-                region = info.find('Region').text.strip() if info.find('Region') is not None else ""
-                zip_code = info.find('Zipcode').text.strip() if info.find('Zipcode') is not None else ""
                 
-                # --- 核心修正：嘗試讀取多種可能的座標欄位 ---
-                # 優先嘗試您提供的 Parkinginfo_Px/Py，若無則嘗試標準 Px/Py
-                px_node = info.find('Parkinginfo_Px') if info.find('Parkinginfo_Px') is not None else info.find('Px')
-                py_node = info.find('Parkinginfo_Py') if info.find('Parkinginfo_Py') is not None else info.find('Py')
+                # 強制將地址中的「台」轉為「臺」進行統一比對
+                normalized_add = raw_add.replace("台北", "臺北").replace("台中", "臺中").replace("台南", "臺南").replace("台東", "臺東")
                 
-                px = px_node.text if px_node is not None else None
-                py = py_node.text if py_node is not None else None
+                # 搜尋地址中是否包含縣市關鍵字
+                found_city = "其他"
+                for c in STANDARD_CITIES:
+                    if c in normalized_add:
+                        found_city = c
+                        break
                 
-                if not px or not py:
-                    stats["skipped_no_coords"] += 1
-                    continue
-
-                # --- 分類邏輯 (郵遞區號優先) ---
-                check_str = (region + raw_add + name).replace("臺", "台")
-                final_city = "其他"
+                px = info.find('Px').text
+                py = info.find('Py').text
                 
-                if zip_code.startswith("1"):
-                    final_city = "臺北市"
-                elif "新北" in check_str and "新北投" not in check_str:
-                    final_city = "新北市"
-                elif "台北" in check_str:
-                    final_city = "臺北市"
-                elif "桃園" in check_str: final_city = "桃園市"
-                elif "台中" in check_str: final_city = "臺中市"
-                elif "台南" in check_str: final_city = "臺南市"
-                elif "高雄" in check_str: final_city = "高雄市"
-                else:
-                    city_map = {"基隆": "基隆市", "新竹": "新竹市", "苗栗": "苗栗縣", "彰化": "彰化縣", "南投": "南投縣", "雲林": "雲林縣", "嘉義": "嘉義市", "屏東": "屏東縣", "宜蘭": "宜蘭縣", "花蓮": "花蓮縣", "台東": "臺東縣"}
-                    for k, v in city_map.items():
-                        if k in check_str:
-                            final_city = v
-                            break
-                
-                if final_city == "臺北市":
-                    stats["taipei_count"] += 1
-
-                all_pois.append({
-                    "名稱": name,
-                    "縣市": final_city, 
-                    "地址": raw_add,
-                    "緯度": float(py),
-                    "經度": float(px),
-                    "郵遞區號": zip_code
-                })
+                if px and py:
+                    all_pois.append({
+                        "名稱": name,
+                        "縣市": found_city, 
+                        "介紹": (info.find('Description').text[:100] + "...") if info.find('Description') is not None else "暫無介紹",
+                        "緯度": float(py),
+                        "經度": float(px)
+                    })
             except:
                 continue
     except Exception as e:
-        st.error(f"資料載入失敗: {e}")
+        st.error(f"政府資料讀取失敗: {e}")
 
-    return pd.DataFrame(all_pois), stats
+    # --- 方法 B: Google 表單 CSV ---
+    SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSTCgMNKX0_D5fre8tFYOE32i_9ikAwx7yOlz5nl0fMbhPVfIQHU32-l2y_jUe1mAInQhlB0ia_A6hy/pub?output=csv"
+    try:
+        sheet_df = pd.read_csv(SHEET_CSV_URL)
+        sheet_df.columns = sheet_df.columns.str.strip()
+        
+        # 處理 CSV 中的縣市欄位，統一為「臺」
+        if '縣市' in sheet_df.columns:
+            sheet_df['縣市'] = sheet_df['縣市'].astype(str).str.replace("台北", "臺北").str.replace("台中", "臺中").str.replace("台南", "臺南").str.replace("台東", "臺東")
+        
+        all_pois.extend(sheet_df.to_dict('records'))
+    except Exception as e:
+        st.warning(f"表單讀取失敗: {e}")
 
-# 執行載入
-poi_df, data_stats = load_all_data()
+    df = pd.DataFrame(all_pois)
+    if not df.empty:
+        # 清洗經緯度
+        df['緯度'] = pd.to_numeric(df['緯度'], errors='coerce')
+        df['經度'] = pd.to_numeric(df['經度'], errors='coerce')
+        df = df.dropna(subset=['緯度', '經度'])
+        # 移除任何可能的隱形空格
+        df['縣市'] = df['縣市'].astype(str).str.strip()
+    
+    return df
 
-# --- 2. 介面設計 ---
+# 載入資料
+poi_df = load_all_data()
+
+# --- 2. 搜尋介面 ---
 st.sidebar.header("🔍 搜尋條件")
 target_address = st.sidebar.text_input("1. 輸入您的位置", "台北車站")
-city_filter = st.sidebar.selectbox("2. 選擇縣市", ["臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市"])
+# 確保選單文字完全等於資料庫內容
+TAIWAN_CITIES = [
+    "臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市", 
+    "基隆市", "新竹縣", "新竹市", "苗栗縣", "彰化縣", "南投縣", 
+    "雲林縣", "嘉義縣", "嘉義市", "屏東縣", "宜蘭縣", "花蓮縣", 
+    "臺東縣", "澎湖縣", "金門縣", "連江縣"
+]
+city_filter = st.sidebar.selectbox("2. 選擇縣市", ["全部縣市"] + TAIWAN_CITIES)
+keyword = st.sidebar.text_input("3. 景點關鍵字")
 
-# 診斷資訊
-st.sidebar.markdown("---")
-st.sidebar.subheader("🛠️ 資料診斷 (V11)")
-st.sidebar.write(f"XML 總讀取: {data_stats['total_read']}")
-st.sidebar.write(f"座標缺失跳過: {data_stats['skipped_no_coords']}")
-st.sidebar.write(f"成功識別臺北市: {data_stats['taipei_count']}")
+# 定位
+geolocator = Nominatim(user_agent="taiwan_kids_map_v4")
+try:
+    loc = geolocator.geocode(target_address)
+    center_coords = (loc.latitude, loc.longitude) if loc else (25.0478, 121.5170)
+except:
+    center_coords = (25.0478, 121.5170)
 
-if st.sidebar.button("🗑️ 清除快取重整"):
-    st.cache_data.clear()
-    st.rerun()
+# 篩選邏輯
+filtered_df = poi_df.copy()
 
-# --- 3. 地圖與列表 ---
-filtered_df = poi_df[poi_df["縣市"] == city_filter]
+if city_filter != "全部縣市":
+    # 精確比對
+    filtered_df = filtered_df[filtered_df["縣市"] == city_filter]
 
-col1, col2 = st.columns([2, 1])
+if keyword:
+    search_key = keyword.replace("台", "臺")
+    filtered_df = filtered_df[filtered_df["名稱"].str.contains(search_key, na=False)]
 
-with col1:
-    st.subheader(f"🗺️ {city_filter}地圖")
-    # 定位中心點
-    geolocator = Nominatim(user_agent="taiwan_kids_v11")
-    try:
-        loc = geolocator.geocode(target_address)
-        center = (loc.latitude, loc.longitude) if loc else (25.0478, 121.5170)
-    except:
-        center = (25.0478, 121.5170)
+# 計算距離
+if not filtered_df.empty:
+    filtered_df["距離(km)"] = filtered_df.apply(
+        lambda r: round(geodesic(center_coords, (r["緯度"], r["經度"])).km, 2), axis=1
+    )
+    filtered_df = filtered_df.sort_values("距離(km)")
+
+# --- 3. 顯示結果 ---
+col_map, col_info = st.columns([2, 1])
+
+with col_map:
+    st.subheader("🗺️ 景點分佈地圖")
+    m = folium.Map(location=center_coords, zoom_start=12)
+    folium.Marker(center_coords, popup="我的位置", icon=folium.Icon(color="red", icon="home")).add_to(m)
     
-    m = folium.Map(location=center, zoom_start=13)
-    folium.Marker(center, popup="我的位置", icon=folium.Icon(color="red")).add_to(m)
-    
-    for _, row in filtered_df.head(100).iterrows():
-        folium.Marker([row["緯度"], row["經度"]], popup=row["名稱"]).add_to(m)
-    st_folium(m, width="100%", height=500, key="map")
+    # 限制地圖顯示筆數提升效能
+    for _, row in filtered_df.head(150).iterrows():
+        popup_text = f"<b>{row['名稱']}</b><br>{row['縣市']}<br>{row.get('介紹', '')}"
+        folium.Marker(
+            [row["緯度"], row["經度"]],
+            popup=folium.Popup(popup_text, max_width=250),
+            icon=folium.Icon(color="blue", icon="info-sign")
+        ).add_to(m)
+    st_folium(m, width="100%", height=600, key="main_map")
 
-with col2:
-    st.subheader("📋 景點清單")
+with col_info:
+    st.subheader("📋 景點列表")
     if not filtered_df.empty:
-        st.dataframe(filtered_df[["名稱", "地址"]].head(50), hide_index=True)
+        st.dataframe(filtered_df[["名稱", "縣市", "距離(km)"]], use_container_width=True, hide_index=True)
     else:
-        st.warning("查無資料")
+        st.info("目前無資料，請嘗試調整搜尋條件。")
