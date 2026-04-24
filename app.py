@@ -36,34 +36,46 @@ def load_all_data():
         
         for info in root.findall(".//Info"):
             try:
-                name = info.find('Name').text.strip() if info.find('Name') is not None else "未知景點"
-                raw_add = info.find('Add').text.strip() if info.find('Add') is not None else ""
-                # 新增：讀取 Region 欄位，這在政府資料中通常存放縣市名稱
-                region = info.find('Region').text.strip() if info.find('Region') is not None else ""
+                name = info.find('Name').text.strip() if info.find('Name') is not None and info.find('Name').text else "未知景點"
                 
-                # 統一將「台」轉為「臺」
-                normalized_text = (region + raw_add).replace("台北", "臺北").replace("台中", "臺中").replace("台南", "臺南").replace("台東", "臺東")
+                # 核心修正：從多個標籤抓取縣市資訊
+                # 1. 抓取 Region (圖片顯示臺北市就在這)
+                reg_node = info.find('Region')
+                region_text = reg_node.text.strip() if reg_node is not None and reg_node.text else ""
                 
-                # 優先判定縣市
+                # 2. 抓取 Add (地址)
+                add_node = info.find('Add')
+                add_text = add_node.text.strip() if add_node is not None and add_node.text else ""
+                
+                # 3. 抓取 Town (鄉鎮區)
+                town_node = info.find('Town')
+                town_text = town_node.text.strip() if town_node is not None and town_node.text else ""
+
+                # 整合所有地理文字並統一字體
+                combined_geo_text = (region_text + town_text + add_text).replace("台北", "臺北").replace("台中", "臺中").replace("台南", "臺南").replace("台東", "臺東")
+                
+                # 判定縣市
                 found_city = "其他"
                 for c in STANDARD_CITIES:
-                    # 同時檢查 Region 和 Address
-                    if c in normalized_text:
+                    if c in combined_geo_text:
                         found_city = c
                         break
                 
-                # 特殊補救：如果還是找不到，但 Region 裡有 "台北"
-                if found_city == "其他" and ("台北" in region or "臺北" in region):
-                    found_city = "臺北市"
+                # 如果還是沒找到，但 region_text 剛好是 "臺北" (沒市字) 的補救
+                if found_city == "其他":
+                    if "臺北" in combined_geo_text: found_city = "臺北市"
+                    elif "臺中" in combined_geo_text: found_city = "臺中市"
+                    elif "臺南" in combined_geo_text: found_city = "臺南市"
+                    elif "高雄" in combined_geo_text: found_city = "高雄市"
 
-                px = info.find('Px').text
-                py = info.find('Py').text
+                px = info.find('Px').text if info.find('Px') is not None else None
+                py = info.find('Py').text if info.find('Py') is not None else None
                 
                 if px and py:
                     all_pois.append({
                         "名稱": name,
                         "縣市": found_city, 
-                        "介紹": (info.find('Description').text[:100] + "...") if info.find('Description') is not None else "暫無介紹",
+                        "介紹": (info.find('Description').text[:100] + "...") if info.find('Description') is not None and info.find('Description').text else "暫無介紹",
                         "緯度": float(py),
                         "經度": float(px)
                     })
@@ -73,15 +85,13 @@ def load_all_data():
         st.error(f"政府資料讀取失敗: {e}")
 
     # --- 方法 B: Google 表單 CSV ---
+    # (此部分邏輯保持不變，但同樣確保縣市比對正確)
     SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSTCgMNKX0_D5fre8tFYOE32i_9ikAwx7yOlz5nl0fMbhPVfIQHU32-l2y_jUe1mAInQhlB0ia_A6hy/pub?output=csv"
     try:
         sheet_df = pd.read_csv(SHEET_CSV_URL)
         sheet_df.columns = sheet_df.columns.str.strip()
-        
         if '縣市' in sheet_df.columns:
-            # 強化 CSV 的縣市轉換邏輯，確保「台北市」變成「臺北市」
-            sheet_df['縣市'] = sheet_df['縣市'].astype(str).str.replace("台北", "臺北").str.replace("台中", "臺中").str.replace("台南", "臺南").replace("台東", "臺東")
-        
+            sheet_df['縣市'] = sheet_df['縣市'].astype(str).str.replace("台北", "臺北").str.replace("台中", "臺中").str.replace("台南", "臺南").str.replace("台東", "臺東")
         all_pois.extend(sheet_df.to_dict('records'))
     except Exception as e:
         st.warning(f"表單讀取失敗: {e}")
@@ -111,22 +121,17 @@ city_filter = st.sidebar.selectbox("2. 選擇縣市", ["全部縣市"] + TAIWAN_
 keyword = st.sidebar.text_input("3. 景點關鍵字")
 
 # 定位邏輯
-geolocator = Nominatim(user_agent="taiwan_kids_map_v4")
+geolocator = Nominatim(user_agent="taiwan_kids_map_v4_fix")
 try:
     loc = geolocator.geocode(target_address)
-    if loc:
-        center_coords = (loc.latitude, loc.longitude)
-    else:
-        center_coords = (25.0478, 121.5170)
+    center_coords = (loc.latitude, loc.longitude) if loc else (25.0478, 121.5170)
 except:
     center_coords = (25.0478, 121.5170)
 
-# 篩選邏輯
+# 篩選
 filtered_df = poi_df.copy()
-
 if city_filter != "全部縣市":
     filtered_df = filtered_df[filtered_df["縣市"] == city_filter]
-
 if keyword:
     search_key = keyword.replace("台", "臺")
     filtered_df = filtered_df[filtered_df["名稱"].str.contains(search_key, na=False)]
@@ -140,7 +145,6 @@ if not filtered_df.empty:
 
 # --- 3. 顯示結果 ---
 col_map, col_info = st.columns([2, 1])
-
 with col_map:
     st.subheader("🗺️ 景點分佈地圖")
     m = folium.Map(location=center_coords, zoom_start=12)
