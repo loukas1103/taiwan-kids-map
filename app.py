@@ -4,7 +4,6 @@ import folium
 import requests
 import xml.etree.ElementTree as ET
 import urllib3
-import re
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
@@ -37,20 +36,26 @@ def load_all_data():
         
         for info in root.findall(".//Info"):
             try:
-                # 取得名稱與地址
                 name = info.find('Name').text.strip() if info.find('Name') is not None else "未知景點"
                 raw_add = info.find('Add').text.strip() if info.find('Add') is not None else ""
+                # 新增：讀取 Region 欄位，這在政府資料中通常存放縣市名稱
+                region = info.find('Region').text.strip() if info.find('Region') is not None else ""
                 
-                # 強制將地址中的「台」轉為「臺」進行統一比對
-                normalized_add = raw_add.replace("台北", "臺北").replace("台中", "臺中").replace("台南", "臺南").replace("台東", "臺東")
+                # 統一將「台」轉為「臺」
+                normalized_text = (region + raw_add).replace("台北", "臺北").replace("台中", "臺中").replace("台南", "臺南").replace("台東", "臺東")
                 
-                # 搜尋地址中是否包含縣市關鍵字
+                # 優先判定縣市
                 found_city = "其他"
                 for c in STANDARD_CITIES:
-                    if c in normalized_add:
+                    # 同時檢查 Region 和 Address
+                    if c in normalized_text:
                         found_city = c
                         break
                 
+                # 特殊補救：如果還是找不到，但 Region 裡有 "台北"
+                if found_city == "其他" and ("台北" in region or "臺北" in region):
+                    found_city = "臺北市"
+
                 px = info.find('Px').text
                 py = info.find('Py').text
                 
@@ -73,9 +78,9 @@ def load_all_data():
         sheet_df = pd.read_csv(SHEET_CSV_URL)
         sheet_df.columns = sheet_df.columns.str.strip()
         
-        # 處理 CSV 中的縣市欄位，統一為「臺」
         if '縣市' in sheet_df.columns:
-            sheet_df['縣市'] = sheet_df['縣市'].astype(str).str.replace("台北", "臺北").str.replace("台中", "臺中").str.replace("台南", "臺南").str.replace("台東", "臺東")
+            # 強化 CSV 的縣市轉換邏輯，確保「台北市」變成「臺北市」
+            sheet_df['縣市'] = sheet_df['縣市'].astype(str).str.replace("台北", "臺北").str.replace("台中", "臺中").str.replace("台南", "臺南").replace("台東", "臺東")
         
         all_pois.extend(sheet_df.to_dict('records'))
     except Exception as e:
@@ -83,11 +88,9 @@ def load_all_data():
 
     df = pd.DataFrame(all_pois)
     if not df.empty:
-        # 清洗經緯度
         df['緯度'] = pd.to_numeric(df['緯度'], errors='coerce')
         df['經度'] = pd.to_numeric(df['經度'], errors='coerce')
         df = df.dropna(subset=['緯度', '經度'])
-        # 移除任何可能的隱形空格
         df['縣市'] = df['縣市'].astype(str).str.strip()
     
     return df
@@ -98,7 +101,6 @@ poi_df = load_all_data()
 # --- 2. 搜尋介面 ---
 st.sidebar.header("🔍 搜尋條件")
 target_address = st.sidebar.text_input("1. 輸入您的位置", "台北車站")
-# 確保選單文字完全等於資料庫內容
 TAIWAN_CITIES = [
     "臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市", 
     "基隆市", "新竹縣", "新竹市", "苗栗縣", "彰化縣", "南投縣", 
@@ -108,11 +110,14 @@ TAIWAN_CITIES = [
 city_filter = st.sidebar.selectbox("2. 選擇縣市", ["全部縣市"] + TAIWAN_CITIES)
 keyword = st.sidebar.text_input("3. 景點關鍵字")
 
-# 定位
+# 定位邏輯
 geolocator = Nominatim(user_agent="taiwan_kids_map_v4")
 try:
     loc = geolocator.geocode(target_address)
-    center_coords = (loc.latitude, loc.longitude) if loc else (25.0478, 121.5170)
+    if loc:
+        center_coords = (loc.latitude, loc.longitude)
+    else:
+        center_coords = (25.0478, 121.5170)
 except:
     center_coords = (25.0478, 121.5170)
 
@@ -120,7 +125,6 @@ except:
 filtered_df = poi_df.copy()
 
 if city_filter != "全部縣市":
-    # 精確比對
     filtered_df = filtered_df[filtered_df["縣市"] == city_filter]
 
 if keyword:
@@ -142,7 +146,6 @@ with col_map:
     m = folium.Map(location=center_coords, zoom_start=12)
     folium.Marker(center_coords, popup="我的位置", icon=folium.Icon(color="red", icon="home")).add_to(m)
     
-    # 限制地圖顯示筆數提升效能
     for _, row in filtered_df.head(150).iterrows():
         popup_text = f"<b>{row['名稱']}</b><br>{row['縣市']}<br>{row.get('介紹', '')}"
         folium.Marker(
