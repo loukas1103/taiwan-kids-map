@@ -97,9 +97,7 @@ def load_base_data():
 # --- 2. AI 擴充景點邏輯 ---
 def get_ai_recommendations(city, keyword):
     try:
-        # 使用最新的 Gemini 2.5 Flash 模型
         model = genai.GenerativeModel('models/gemini-2.5-flash')
-        
         prompt = f"""
         你是一個台灣旅遊專家。請推薦 5 個位於 {city} 的親子旅遊景點，
         關鍵字必須包含 '{keyword}'。
@@ -110,17 +108,14 @@ def get_ai_recommendations(city, keyword):
           {{"名稱": "景點名", "縣市": "{city}", "緯度": 25.0, "經度": 121.0}}
         ]
         """
-        
         response = model.generate_content(
             prompt,
             generation_config={"response_mime_type": "application/json"}
         )
-        
         ai_data = json.loads(response.text)
         for item in ai_data:
             item['來源'] = "AI 智慧推薦"
         return ai_data
-
     except Exception as e:
         st.sidebar.error(f"AI 搜尋出錯：{str(e)}")
         return []
@@ -134,47 +129,47 @@ keyword = st.sidebar.text_input("3. 景點關鍵字")
 use_ai = st.sidebar.checkbox("✨ 啟用 AI 擴充搜尋")
 
 # 定位我的位置
-geolocator = Nominatim(user_agent="taiwan_kids_map_v8")
+geolocator = Nominatim(user_agent="taiwan_kids_map_v9")
 try:
     loc = geolocator.geocode(target_address)
     center_coords = (loc.latitude, loc.longitude) if loc else (25.0478, 121.5170)
 except:
     center_coords = (25.0478, 121.5170)
 
-# 載入並初步篩選
+# 讀取基礎資料
 poi_df = load_base_data()
 filtered_df = poi_df[poi_df["縣市"] == city_filter].copy()
-
 if keyword:
     search_key = keyword.replace("台", "臺")
     filtered_df = filtered_df[filtered_df["名稱"].str.contains(search_key, na=False)]
 
-# AI 按鈕
+# AI 按鈕行為
 if use_ai:
     if st.sidebar.button("開始 AI 尋找景點"):
-        with st.spinner("AI 正在為您搜尋最近景點..."):
+        with st.spinner("AI 正在排除一般資料，尋找專屬景點..."):
             res = get_ai_recommendations(city_filter, keyword)
             if res:
                 st.session_state.ai_results = res
-                st.rerun() # 立即重新整理以載入 AI 資料
+                st.rerun()
 
-# 合併並計算距離
-final_df = filtered_df.copy()
-if st.session_state.ai_results:
-    ai_df = pd.DataFrame(st.session_state.ai_results)
-    final_df = pd.concat([final_df, ai_df], ignore_index=True)
+# --- 核心邏輯：決定最終要顯示的資料 ---
+if use_ai and st.session_state.ai_results:
+    # 如果啟用 AI 且有結果，則「僅顯示」AI 結果
+    display_df = pd.DataFrame(st.session_state.ai_results)
+else:
+    # 否則顯示 XML/CSV 的原始資料
+    display_df = filtered_df.copy()
 
-if not final_df.empty:
-    # 統一計算距離
-    final_df["距離(km)"] = final_df.apply(
+# 計算距離與排序
+if not display_df.empty:
+    display_df["距離(km)"] = display_df.apply(
         lambda r: round(geodesic(center_coords, (r["緯度"], r["經度"])).km, 2), axis=1
     )
-    # 距離近者優先排序
-    final_df = final_df.sort_values("距離(km)")
+    display_df = display_df.sort_values("距離(km)")
 
 # 清除 AI 按鈕
 if st.session_state.ai_results:
-    if st.sidebar.button("🗑️ 清除 AI 搜尋結果"):
+    if st.sidebar.button("🗑️ 清除 AI 搜尋結果 (回到原始資料)"):
         st.session_state.ai_results = []
         st.rerun()
 
@@ -185,40 +180,15 @@ col1, col2 = st.columns([2, 1])
 
 with col1:
     m = folium.Map(location=center_coords, zoom_start=13)
-    # 我的位置 - 紅色
     folium.Marker(center_coords, popup="我的位置", icon=folium.Icon(color="red", icon="home")).add_to(m)
     
-    # 標記在地圖上的圖釘
-    for _, row in final_df.head(100).iterrows():
+    for _, row in display_df.head(100).iterrows():
         src = row.get("來源", "政府公開資料")
         
-        # 依照來源決定圖釘顏色：AI 為黃色(orange)，其他為藍色/綠色
+        # 視覺化標記：AI 為黃色，原始資料為藍色
         if src == "AI 智慧推薦":
             pin_color = "orange"
-        elif src == "社群回報資料":
-            pin_color = "green"
         else:
             pin_color = "blue"
             
-        # 圖釘資訊：顯示名稱及距離即可
-        popup_content = f"<b>{row['名稱']}</b><br>距離: {row['距離(km)']} km"
-        
-        folium.Marker(
-            [row["緯度"], row["經度"]],
-            popup=folium.Popup(popup_content, max_width=200),
-            icon=folium.Icon(color=pin_color, icon="info-sign")
-        ).add_to(m)
-        
-    st_folium(m, width="100%", height=600, key="main_map")
-
-with col2:
-    st.subheader("📋 推薦清單 (距離近優先)")
-    if not final_df.empty:
-        # 清單中刪除來源，僅顯示名稱與距離
-        st.dataframe(
-            final_df[["名稱", "距離(km)"]], 
-            use_container_width=True, 
-            hide_index=True
-        )
-    else:
-        st.info("目前的條件下無景點，請調整關鍵字或開啟 AI 搜尋。")
+        popup_content = f"<b>{row['名稱']}</b><br>距離: {row['
