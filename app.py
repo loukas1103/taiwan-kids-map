@@ -98,29 +98,40 @@ def load_base_data():
 
 # --- 2. AI 擴充景點邏輯 ---
 def get_ai_recommendations(city, keyword):
-    # 使用 1.5-flash 速度快且支援結構化 JSON
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    
-    # 修正重點：在 f-string 中使用 {{ }} 來代表純文字的大括號
-    prompt = f"""
-    你是一個台灣旅遊專家。請推薦 5 個位於 {city} 的親子旅遊景點，
-    關鍵字必須包含 '{keyword}'。
-    請嚴格以 JSON 列表格式輸出，不要包含任何 markdown 標籤或解釋文字。
-    每個物件必須包含：名稱, 縣市, 介紹, 緯度, 經度。
-    範例格式：
-    [
-      {{"名稱": "景點名", "縣市": "{city}", "介紹": "理由", "緯度": 25.0, "經度": 121.0}}
-    ]
-    """
+    # 修正重點：將模型名稱改為 gemini-1.5-flash-latest 或 gemini-pro
+    # 如果 gemini-1.5-flash 依然失敗，請嘗試換成 'gemini-pro'
     try:
+        # 嘗試使用較新的 flash 版本，若不行則自動退回 pro 版本
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        except:
+            model = genai.GenerativeModel('gemini-pro')
+            
+        # 修正重點：在 f-string 中使用 {{ }} 來代表純文字的大括號
+        prompt = f"""
+        你是一個台灣旅遊專家。請推薦 5 個位於 {city} 的親子旅遊景點，
+        關鍵字必須包含 '{keyword}'。
+        請嚴格以 JSON 列表格式輸出，不要包含任何 markdown 標籤或解釋文字。
+        每個物件必須包含：名稱, 縣市, 介紹, 緯度, 經度。
+        範例格式：
+        [
+          {{"名稱": "景點名", "縣市": "{city}", "介紹": "理由", "緯度": 25.0, "經度": 121.0}}
+        ]
+        """
+        
         response = model.generate_content(prompt)
-        # 清理可能出現的 markdown 標記
+        
+        # 取得回傳文字並清理
         clean_text = response.text.replace("```json", "").replace("```", "").strip()
+        
+        # 解析 JSON
         ai_data = json.loads(clean_text)
         for item in ai_data:
             item['來源'] = "AI 智慧推薦"
         return ai_data
+
     except Exception as e:
+        # 在側邊欄顯示具體錯誤，方便除錯
         st.sidebar.error(f"AI 搜尋出錯：{str(e)}")
         return []
 
