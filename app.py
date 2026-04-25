@@ -103,7 +103,7 @@ def get_ai_recommendations(city, keyword):
     try:
         # 嘗試使用較新的 flash 版本，若不行則自動退回 pro 版本
         try:
-            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            model = genai.GenerativeModel('gemini-pro')
         except:
             model = genai.GenerativeModel('gemini-pro')
             
