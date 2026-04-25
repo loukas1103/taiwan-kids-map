@@ -6,3 +6,5 @@ geopy
 gspread
 oauth2client
 requests
+google-generativeai
+urllib3
