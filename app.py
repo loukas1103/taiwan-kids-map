@@ -95,15 +95,20 @@ def load_base_data():
     return df
 
 # --- 2. AI 擴充景點邏輯 ---
-def get_ai_recommendations(city, keyword):
+def get_ai_recommendations(city, keyword, center_coords):
     try:
-        # 使用最新的 Gemini 2.5 Flash 模型
         model = genai.GenerativeModel('models/gemini-2.5-flash')
         
+        # 修改點：在 Prompt 中加入座標中心點與 2KM 限制
         prompt = f"""
-        你是一個台灣旅遊專家。請推薦 5 個位於 {city} 的親子旅遊景點，
-        關鍵字必須包含 '{keyword}'。
-        請嚴格以 JSON 列表格式輸出，不要包含任何解釋文字。
+        你是一個台灣旅遊專家。請推薦 5 個位於 {city} 的親子旅遊景點。
+        目前的中心座標為：緯度 {center_coords[0]}, 經度 {center_coords[1]}。
+        
+        要求：
+        1. 景點必須距離中心座標 2 公里（2KM）以內。
+        2. 關鍵字必須包含 '{keyword}'。
+        3. 請嚴格以 JSON 列表格式輸出，不要包含任何解釋文字。
+        
         物件包含：名稱, 縣市, 緯度, 經度。
         範例格式：
         [
@@ -117,9 +122,16 @@ def get_ai_recommendations(city, keyword):
         )
         
         ai_data = json.loads(response.text)
+        
+        # 修改點：二次過濾，確保距離真的在 2KM 內（避免 AI 幻覺）
+        verified_results = []
         for item in ai_data:
-            item['來源'] = "AI 智慧推薦"
-        return ai_data
+            dist = geodesic(center_coords, (item["緯度"], item["經度"])).km
+            if dist <= 2.0:
+                item['來源'] = "AI 智慧推薦"
+                verified_results.append(item)
+        
+        return verified_results
 
     except Exception as e:
         st.sidebar.error(f"AI 搜尋出錯：{str(e)}")
@@ -134,7 +146,7 @@ keyword = st.sidebar.text_input("3. 景點關鍵字")
 use_ai = st.sidebar.checkbox("✨ 啟用 AI 擴充搜尋")
 
 # 定位我的位置
-geolocator = Nominatim(user_agent="taiwan_kids_map_v8")
+geolocator = Nominatim(user_agent="taiwan_kids_map_v9")
 try:
     loc = geolocator.geocode(target_address)
     center_coords = (loc.latitude, loc.longitude) if loc else (25.0478, 121.5170)
@@ -152,17 +164,23 @@ if keyword:
 # AI 按鈕
 if use_ai:
     if st.sidebar.button("開始 AI 尋找景點"):
-        with st.spinner("AI 正在為您搜尋最近景點..."):
-            res = get_ai_recommendations(city_filter, keyword)
+        with st.spinner("AI 正在為您搜尋 2KM 內景點..."):
+            # 傳入中心座標供 AI 參考
+            res = get_ai_recommendations(city_filter, keyword, center_coords)
             if res:
                 st.session_state.ai_results = res
-                st.rerun() # 立即重新整理以載入 AI 資料
+                st.success(f"找到 {len(res)} 個符合 2KM 限制的景點！")
+                st.rerun()
+            else:
+                st.warning("AI 找不到 2KM 內的相符景點。")
 
-# 合併並計算距離
-final_df = filtered_df.copy()
-if st.session_state.ai_results:
-    ai_df = pd.DataFrame(st.session_state.ai_results)
-    final_df = pd.concat([final_df, ai_df], ignore_index=True)
+# 合併資料（根據模式切換）
+if use_ai and st.session_state.ai_results:
+    # 啟用 AI 時僅顯示 AI 結果
+    final_df = pd.DataFrame(st.session_state.ai_results)
+else:
+    # 否則顯示原始資料
+    final_df = filtered_df.copy()
 
 if not final_df.empty:
     # 統一計算距離
@@ -184,25 +202,25 @@ st.title(f"📍 {city_filter} 親子旅遊查詢系統")
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    m = folium.Map(location=center_coords, zoom_start=13)
-    # 我的位置 - 紅色
+    m = folium.Map(location=center_coords, zoom_start=14) # 範圍縮小，預設 Zoom 改 14
     folium.Marker(center_coords, popup="我的位置", icon=folium.Icon(color="red", icon="home")).add_to(m)
     
-    # 標記在地圖上的圖釘
-    for _, row in final_df.head(100).iterrows():
+    # 畫出 2KM 的視覺化圓圈
+    folium.Circle(
+        radius=2000,
+        location=center_coords,
+        color="crimson",
+        fill=True,
+        fill_color="crimson",
+        fill_opacity=0.1
+    ).add_to(m)
+    
+    for _, row in final_df.iterrows():
         src = row.get("來源", "政府公開資料")
-        
-        # 依照來源決定圖釘顏色：AI 為黃色(orange)，其他為藍色/綠色
-        if src == "AI 智慧推薦":
-            pin_color = "orange"
-        elif src == "社群回報資料":
-            pin_color = "green"
-        else:
-            pin_color = "blue"
+        pin_color = "orange" if src == "AI 智慧推薦" else "blue"
+        if src == "社群回報資料": pin_color = "green"
             
-        # 圖釘資訊：顯示名稱及距離即可
         popup_content = f"<b>{row['名稱']}</b><br>距離: {row['距離(km)']} km"
-        
         folium.Marker(
             [row["緯度"], row["經度"]],
             popup=folium.Popup(popup_content, max_width=200),
@@ -212,13 +230,9 @@ with col1:
     st_folium(m, width="100%", height=600, key="main_map")
 
 with col2:
-    st.subheader("📋 推薦清單 (距離近優先)")
+    mode_text = "✨ AI 推薦 (2KM 內)" if (use_ai and st.session_state.ai_results) else "📋 原始資料清單"
+    st.subheader(mode_text)
     if not final_df.empty:
-        # 清單中刪除來源，僅顯示名稱與距離
-        st.dataframe(
-            final_df[["名稱", "距離(km)"]], 
-            use_container_width=True, 
-            hide_index=True
-        )
+        st.dataframe(final_df[["名稱", "距離(km)"]], use_container_width=True, hide_index=True)
     else:
-        st.info("目前的條件下無景點，請調整關鍵字或開啟 AI 搜尋。")
+        st.info("無相符景點。")
