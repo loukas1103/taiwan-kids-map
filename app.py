@@ -98,26 +98,23 @@ def load_base_data():
 # --- 3. AI 擴充景點邏輯 ---
 def get_ai_recommendations(city, keyword, center_coords):
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"""
-        推薦 5 個位於 {city} 的親子景點，座標中心：{center_coords[0]}, {center_coords[1]}。
-        要求：2KM內、包含關鍵字'{keyword}'、嚴格JSON格式[{"名稱":"", "縣市":"", "緯度":0.0, "經度":0.0}]。
-        """
+        model = genai.GenerativeModel('models/gemini-2.5-flash')
+        prompt = f"..." # 您的 Prompt
+        
         response = model.generate_content(
             prompt,
+            # 強制要求 JSON 輸出模式
             generation_config={"response_mime_type": "application/json"}
         )
-        ai_data = json.loads(response.text)
         
-        verified_results = []
-        for item in ai_data:
-            dist = geodesic(center_coords, (item["緯度"], item["經度"])).km
-            if dist <= 2.0:
-                item['來源'] = "AI 智慧推薦"
-                verified_results.append(item)
-        return verified_results
+        # 移除可能干擾解析的空白或特殊字元
+        clean_text = response.text.strip()
+        ai_data = json.loads(clean_text)
+        
+        # ... 後續距離過濾邏輯
     except Exception as e:
-        st.sidebar.error(f"AI 搜尋出錯")
+        # 在開發階段，建議把 e 印出來看看具體錯誤是什麼
+        st.sidebar.error(f"AI 搜尋出錯內容：{str(e)}") 
         return []
 
 # --- 4. 主介面邏輯 ---
