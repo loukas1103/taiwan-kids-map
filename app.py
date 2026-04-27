@@ -98,7 +98,7 @@ def load_base_data():
 # --- 3. AI 擴充景點邏輯 ---
 def get_ai_recommendations(city, keyword, center_coords):
     try:
-        model = genai.GenerativeModel('models/gemini-2.5-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = f"""
         推薦 5 個位於 {city} 的親子景點，座標中心：{center_coords[0]}, {center_coords[1]}。
         要求：2KM內、包含關鍵字'{keyword}'、嚴格JSON格式[{"名稱":"", "縣市":"", "緯度":0.0, "經度":0.0}]。
