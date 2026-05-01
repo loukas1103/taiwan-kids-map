@@ -85,24 +85,43 @@ def load_base_data():
         df = df.dropna(subset=['緯度', '經度'])
     return df
 
-# --- 2. 地理位置快取 ---
+# --- 2. 地理位置快取 (優化搜尋語法) ---
 @st.cache_data(ttl=86400)
 def get_coordinates(address):
-    geolocator = Nominatim(user_agent="taiwan_kids_map_v11")
+    # 如果使用者沒輸入內容，直接回傳預設值
+    if not address or address.strip() == "":
+        return (25.0478, 121.5170)
+    
+    geolocator = Nominatim(user_agent="taiwan_kids_map_v11_fixed")
     try:
-        loc = geolocator.geocode(address)
+        # 強制加上 ", Taiwan" 增加 Nominatim 的辨識率
+        search_query = f"{address}, Taiwan"
+        loc = geolocator.geocode(search_query, timeout=10)
         if loc:
             return (loc.latitude, loc.longitude)
-    except:
-        pass
-    return (25.0478, 121.5170) # 預設台北車站
+        else:
+            # 如果加了台灣還找不到，嘗試原詞搜尋
+            loc = geolocator.geocode(address, timeout=10)
+            if loc:
+                return (loc.latitude, loc.longitude)
+    except Exception as e:
+        print(f"Geocoding error: {e}")
+    
+    return None  # 改為回傳 None，方便判斷是否定位失敗
 
 # --- 3. 介面與搜尋邏輯 ---
 st.sidebar.header("🔍 景點搜尋")
 target_address = st.sidebar.text_input("1. 輸入您的中心位置", "台北車站")
-TAIWAN_CITIES = ["臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市", "新竹市", "新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義市", "嘉義縣", "屏東縣", "宜蘭縣", "花蓮縣", "臺東縣"]
-city_filter = st.sidebar.selectbox("2. 選擇縣市", TAIWAN_CITIES)
-keyword = st.sidebar.text_input("3. 景點名稱關鍵字")
+
+# 獲取中心座標並處理失敗情況
+raw_coords = get_coordinates(target_address)
+if raw_coords is None:
+    st.sidebar.warning(f"⚠️ 無法定位 '{target_address}'，已暫時使用台北車站座標。請嘗試輸入更精確的地址。")
+    center_coords = (25.0478, 121.5170)
+else:
+    center_coords = raw_coords
+
+# ... (後面其餘程式碼保持不變)
 
 # 獲取中心座標
 center_coords = get_coordinates(target_address)
