@@ -7,12 +7,19 @@ import urllib3
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
+import time
 
 # 消除 SSL 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 設定頁面配置 (使用寬版模式)
-st.set_page_config(layout="wide", page_title="全台親子旅遊地圖")
+# 設定頁面配置
+st.set_page_config(layout="wide", page_title="全台親子旅遊地圖", page_icon="📍")
+
+# --- 初始化 Session State ---
+if 'center_coords' not in st.session_state:
+    st.session_state.center_coords = (25.0478, 121.5170)  # 預設台北車站
+if 'last_address' not in st.session_state:
+    st.session_state.last_address = "台北車站"
 
 # --- 1. 高效率資料匯入與快取 ---
 @st.cache_data(ttl=3600)
@@ -26,7 +33,6 @@ def load_base_data():
     ]
 
     try:
-        # 政府公開資料
         gov_url = "https://media.taiwan.net.tw/XMLReleaseALL_public/scenic_spot_C_f.xml"
         response = requests.get(gov_url, timeout=15, verify=False)
         response.encoding = 'utf-8'
@@ -35,7 +41,6 @@ def load_base_data():
         for info in root.findall(".//Info"):
             try:
                 name = info.find('Name').text.strip() if info.find('Name') is not None else "未知景點"
-                # 取得景點介紹欄位 Toldescribe
                 desc = info.find('Toldescribe').text.strip() if info.find('Toldescribe') is not None else "暫無介紹內容。"
                 reg_node = info.find('Region')
                 add_node = info.find('Add')
@@ -66,7 +71,6 @@ def load_base_data():
     except Exception as e:
         st.error(f"政府資料讀取失敗: {e}")
 
-    # 社群回報資料 (Google Sheet)
     SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSTCgMNKX0_D5fre8tFYOE32i_9ikAwx7yOlz5nl0fMbhPVfIQHU32-l2y_jUe1mAInQhlB0ia_A6hy/pub?output=csv"
     try:
         sheet_df = pd.read_csv(SHEET_CSV_URL)
@@ -75,7 +79,7 @@ def load_base_data():
             sheet_df['來源'] = "社群回報資料"
             if '介紹' not in sheet_df.columns:
                 sheet_df['介紹'] = "社群推薦親子景點。"
-        all_pois.extend(sheet_df.to_dict('records'))
+            all_pois.extend(sheet_df.to_dict('records'))
     except: pass
 
     df = pd.DataFrame(all_pois)
@@ -85,79 +89,82 @@ def load_base_data():
         df = df.dropna(subset=['緯度', '經度'])
     return df
 
-# --- 2. 地理位置快取 ---
-@st.cache_data(ttl=86400)
-def get_coordinates(address):
-    geolocator = Nominatim(user_agent="taiwan_kids_map_v11")
+# --- 2. 地理位置搜尋邏輯 ---
+def update_location(address):
+    """處理地址轉換座標並存入 Session"""
+    if not address:
+        return
+    
+    # 增加 "台灣" 關鍵字以提高精準度
+    search_query = f"{address}, Taiwan"
+    geolocator = Nominatim(user_agent="taiwan_kids_map_v2_fix")
+    
     try:
-        loc = geolocator.geocode(address)
-        if loc:
-            return (loc.latitude, loc.longitude)
-    except:
-        pass
-    return (25.0478, 121.5170) # 預設台北車站
+        with st.spinner('正在定位中...'):
+            # 增加延遲避免被 Nominatim 封鎖
+            time.sleep(1) 
+            loc = geolocator.geocode(search_query)
+            if loc:
+                st.session_state.center_coords = (loc.latitude, loc.longitude)
+                st.session_state.last_address = address
+                st.success(f"成功定位至：{address}")
+            else:
+                st.warning("找不到該位置，請嘗試更精確的地址（例如：台北市信義區...）")
+    except Exception as e:
+        st.error("定位服務繁忙，請稍後再試或檢查網路。")
 
-# --- 3. 介面與搜尋邏輯 ---
+# --- 3. 側邊欄介面 ---
 st.sidebar.header("🔍 景點搜尋")
-target_address = st.sidebar.text_input("1. 輸入您的中心位置", "台北車站")
+
+# 地址輸入與按鈕
+target_address = st.sidebar.text_input("1. 輸入您的中心位置", st.session_state.last_address)
+if st.sidebar.button("確認定位"):
+    update_location(target_address)
+
 TAIWAN_CITIES = ["臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市", "新竹市", "新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義市", "嘉義縣", "屏東縣", "宜蘭縣", "花蓮縣", "臺東縣"]
 city_filter = st.sidebar.selectbox("2. 選擇縣市", TAIWAN_CITIES)
 keyword = st.sidebar.text_input("3. 景點名稱關鍵字")
 
-# 獲取中心座標
-center_coords = get_coordinates(target_address)
-
-# 載入與篩選資料
+# 載入資料
 poi_df = load_base_data()
-filtered_df = poi_df[poi_df["縣市"] == city_filter].copy()
 
+# 篩選邏輯
+filtered_df = poi_df[poi_df["縣市"] == city_filter].copy()
 if keyword:
     search_key = keyword.replace("台", "臺")
     filtered_df = filtered_df[filtered_df["名稱"].str.contains(search_key, na=False)]
 
-# 計算距離
+# 計算距離 (使用 Session 中的中心點)
 if not filtered_df.empty:
     filtered_df["距離(km)"] = filtered_df.apply(
-        lambda r: round(geodesic(center_coords, (r["緯度"], r["經度"])).km, 2), axis=1
+        lambda r: round(geodesic(st.session_state.center_coords, (r["緯度"], r["經度"])).km, 2), axis=1
     )
-    # 僅顯示 10km 內的景點以維持流暢度 (可視需求調整)
     filtered_df = filtered_df.sort_values("距離(km)")
 
-# --- 4. 渲染全螢幕地圖 ---
+# --- 4. 渲染地圖 ---
 st.title(f"📍 {city_filter} 親子旅遊圖釘地圖")
-st.markdown("💡 **操作提示**：點擊地圖上的**藍色/綠色圖釘**，即可直接查看該景點的詳細介紹與距離。")
+st.markdown(f"🏠 當前中心：**{st.session_state.last_address}**")
 
-# 建立地圖物件
-m = folium.Map(location=center_coords, zoom_start=14, control_scale=True)
+# 建立地圖
+m = folium.Map(location=st.session_state.center_coords, zoom_start=14, control_scale=True)
 
-# 標記中心位置 (家/起點)
+# 標記中心位置
 folium.Marker(
-    center_coords, 
+    st.session_state.center_coords, 
     popup="我的位置", 
     icon=folium.Icon(color="red", icon="home")
 ).add_to(m)
 
-# 繪製 2KM 視覺圈
-folium.Circle(
-    radius=2000,
-    location=center_coords,
-    color="crimson",
-    fill=True,
-    fill_color="crimson",
-    fill_opacity=0.05
-).add_to(m)
-
-# 標記所有符合條件的景點
-for _, row in filtered_df.iterrows():
+# 標記景點
+for _, row in filtered_df.head(100).iterrows(): # 限制數量提升流暢度
     pin_color = "blue" if row["來源"] == "政府公開資料" else "green"
     
-    # 建立彈出視窗的 HTML 內容，優化閱讀排版
     popup_html = f"""
-    <div style="width: 250px; font-family: sans-serif;">
+    <div style="width: 200px; font-family: sans-serif;">
         <h4 style="margin-bottom: 5px; color: #1f77b4;">{row['名稱']}</h4>
-        <p style="margin: 0; font-size: 0.9em; color: #555;"><b>距離：</b>{row['距離(km)']} km</p>
-        <hr style="margin: 10px 0;">
-        <div style="max-height: 150px; overflow-y: auto; font-size: 0.85em; line-height: 1.4;">
+        <p style="margin: 0; font-size: 0.9em;"><b>距離：</b>{row['距離(km)']} km</p>
+        <hr style="margin: 8px 0;">
+        <div style="max-height: 100px; overflow-y: auto; font-size: 0.85em;">
             {row['介紹']}
         </div>
     </div>
@@ -165,13 +172,12 @@ for _, row in filtered_df.iterrows():
     
     folium.Marker(
         [row["緯度"], row["經度"]],
-        popup=folium.Popup(popup_html, max_width=300),
+        popup=folium.Popup(popup_html, max_width=250),
         icon=folium.Icon(color=pin_color, icon="info-sign"),
-        tooltip=row['名稱'] # 滑鼠移上去會顯示名稱
+        tooltip=row['名稱']
     ).add_to(m)
 
-# 顯示地圖，將高度調大
-st_folium(m, width="100%", height=800, returned_objects=[])
+# 顯示地圖
+st_folium(m, width="100%", height=600, key="main_map", returned_objects=[])
 
-# 頁尾說明
-st.caption(f"目前顯示 {len(filtered_df)} 個景點。資料來源：交通部觀光署公開資料庫、社群協作表格。")
+st.caption(f"顯示 {len(filtered_df)} 個景點。中心點座標: {st.session_state.center_coords}")
