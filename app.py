@@ -121,10 +121,6 @@ if raw_coords is None:
 else:
     center_coords = raw_coords
 
-if keyword:
-    search_key = keyword.replace("台", "臺")
-    filtered_df = filtered_df[filtered_df["名稱"].str.contains(search_key, na=False)]
-
 # 計算距離
 if not filtered_df.empty:
     filtered_df["距離(km)"] = filtered_df.apply(
