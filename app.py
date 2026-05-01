@@ -4,8 +4,6 @@ import folium
 import requests
 import xml.etree.ElementTree as ET
 import urllib3
-import json
-import google.generativeai as genai
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
@@ -13,21 +11,10 @@ from geopy.distance import geodesic
 # 消除 SSL 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 設定頁面配置
-st.set_page_config(layout="wide", page_title="全台親子旅遊自動化查詢站 (AI 加強版)")
+# 設定頁面配置 (使用寬版模式)
+st.set_page_config(layout="wide", page_title="全台親子旅遊地圖")
 
-# 初始化 Session State
-if 'ai_results' not in st.session_state:
-    st.session_state.ai_results = []
-
-# --- API 金鑰設定 ---
-try:
-    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"] 
-    genai.configure(api_key=GEMINI_API_KEY)
-except:
-    st.error("請在 Secrets 中設定 GEMINI_API_KEY")
-
-# --- 1. 資料匯入邏輯 ---
+# --- 1. 高效率資料匯入與快取 ---
 @st.cache_data(ttl=3600)
 def load_base_data():
     all_pois = []
@@ -39,6 +26,7 @@ def load_base_data():
     ]
 
     try:
+        # 政府公開資料
         gov_url = "https://media.taiwan.net.tw/XMLReleaseALL_public/scenic_spot_C_f.xml"
         response = requests.get(gov_url, timeout=15, verify=False)
         response.encoding = 'utf-8'
@@ -47,6 +35,8 @@ def load_base_data():
         for info in root.findall(".//Info"):
             try:
                 name = info.find('Name').text.strip() if info.find('Name') is not None else "未知景點"
+                # 取得景點介紹欄位 Toldescribe
+                desc = info.find('Toldescribe').text.strip() if info.find('Toldescribe') is not None else "暫無介紹內容。"
                 reg_node = info.find('Region')
                 add_node = info.find('Add')
                 reg_text = reg_node.text.strip() if reg_node is not None and reg_node.text else ""
@@ -60,9 +50,6 @@ def load_base_data():
                         found_city = c
                         break
                 
-                if found_city == "其他" and "臺北" in geo_combined:
-                    found_city = "臺北市"
-
                 px = info.find('Px').text if info.find('Px') is not None else None
                 py = info.find('Py').text if info.find('Py') is not None else None
                 
@@ -72,18 +59,22 @@ def load_base_data():
                         "縣市": found_city, 
                         "緯度": float(py),
                         "經度": float(px),
+                        "介紹": desc,
                         "來源": "政府公開資料"
                     })
             except: continue
     except Exception as e:
         st.error(f"政府資料讀取失敗: {e}")
 
+    # 社群回報資料 (Google Sheet)
     SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSTCgMNKX0_D5fre8tFYOE32i_9ikAwx7yOlz5nl0fMbhPVfIQHU32-l2y_jUe1mAInQhlB0ia_A6hy/pub?output=csv"
     try:
         sheet_df = pd.read_csv(SHEET_CSV_URL)
         if '縣市' in sheet_df.columns:
             sheet_df['縣市'] = sheet_df['縣市'].astype(str).str.replace("台北", "臺北").str.replace("台中", "臺中")
             sheet_df['來源'] = "社群回報資料"
+            if '介紹' not in sheet_df.columns:
+                sheet_df['介紹'] = "社群推薦親子景點。"
         all_pois.extend(sheet_df.to_dict('records'))
     except: pass
 
@@ -94,66 +85,29 @@ def load_base_data():
         df = df.dropna(subset=['緯度', '經度'])
     return df
 
-# --- 2. AI 擴充景點邏輯 ---
-def get_ai_recommendations(city, keyword, center_coords):
+# --- 2. 地理位置快取 ---
+@st.cache_data(ttl=86400)
+def get_coordinates(address):
+    geolocator = Nominatim(user_agent="taiwan_kids_map_v11")
     try:
-        model = genai.GenerativeModel('models/gemini-2.5-flash')
-        
-        # 修改點：在 Prompt 中加入座標中心點與 2KM 限制
-        prompt = f"""
-        你是一個台灣旅遊專家。請推薦 5 個位於 {city} 的親子旅遊景點。
-        目前的中心座標為：緯度 {center_coords[0]}, 經度 {center_coords[1]}。
-        
-        要求：
-        1. 景點必須距離中心座標 2 公里（2KM）以內。
-        2. 關鍵字必須包含 '{keyword}'。
-        3. 請嚴格以 JSON 列表格式輸出，不要包含任何解釋文字。
-        
-        物件包含：名稱, 縣市, 緯度, 經度。
-        範例格式：
-        [
-          {{"名稱": "景點名", "縣市": "{city}", "緯度": 25.0, "經度": 121.0}}
-        ]
-        """
-        
-        response = model.generate_content(
-            prompt,
-            generation_config={"response_mime_type": "application/json"}
-        )
-        
-        ai_data = json.loads(response.text)
-        
-        # 修改點：二次過濾，確保距離真的在 2KM 內（避免 AI 幻覺）
-        verified_results = []
-        for item in ai_data:
-            dist = geodesic(center_coords, (item["緯度"], item["經度"])).km
-            if dist <= 2.0:
-                item['來源'] = "AI 智慧推薦"
-                verified_results.append(item)
-        
-        return verified_results
+        loc = geolocator.geocode(address)
+        if loc:
+            return (loc.latitude, loc.longitude)
+    except:
+        pass
+    return (25.0478, 121.5170) # 預設台北車站
 
-    except Exception as e:
-        st.sidebar.error(f"AI 搜尋出錯：{str(e)}")
-        return []
-
-# --- 3. 介面與邏輯 ---
-st.sidebar.header("🔍 搜尋條件")
-target_address = st.sidebar.text_input("1. 輸入您的位置", "台北車站")
+# --- 3. 介面與搜尋邏輯 ---
+st.sidebar.header("🔍 景點搜尋")
+target_address = st.sidebar.text_input("1. 輸入您的中心位置", "台北車站")
 TAIWAN_CITIES = ["臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市", "新竹市", "新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義市", "嘉義縣", "屏東縣", "宜蘭縣", "花蓮縣", "臺東縣"]
 city_filter = st.sidebar.selectbox("2. 選擇縣市", TAIWAN_CITIES)
-keyword = st.sidebar.text_input("3. 景點關鍵字")
-use_ai = st.sidebar.checkbox("✨ 啟用 AI 擴充搜尋")
+keyword = st.sidebar.text_input("3. 景點名稱關鍵字")
 
-# 定位我的位置
-geolocator = Nominatim(user_agent="taiwan_kids_map_v9")
-try:
-    loc = geolocator.geocode(target_address)
-    center_coords = (loc.latitude, loc.longitude) if loc else (25.0478, 121.5170)
-except:
-    center_coords = (25.0478, 121.5170)
+# 獲取中心座標
+center_coords = get_coordinates(target_address)
 
-# 載入並初步篩選
+# 載入與篩選資料
 poi_df = load_base_data()
 filtered_df = poi_df[poi_df["縣市"] == city_filter].copy()
 
@@ -161,78 +115,63 @@ if keyword:
     search_key = keyword.replace("台", "臺")
     filtered_df = filtered_df[filtered_df["名稱"].str.contains(search_key, na=False)]
 
-# AI 按鈕
-if use_ai:
-    if st.sidebar.button("開始 AI 尋找景點"):
-        with st.spinner("AI 正在為您搜尋 2KM 內景點..."):
-            # 傳入中心座標供 AI 參考
-            res = get_ai_recommendations(city_filter, keyword, center_coords)
-            if res:
-                st.session_state.ai_results = res
-                st.success(f"找到 {len(res)} 個符合 2KM 限制的景點！")
-                st.rerun()
-            else:
-                st.warning("AI 找不到 2KM 內的相符景點。")
-
-# 合併資料（根據模式切換）
-if use_ai and st.session_state.ai_results:
-    # 啟用 AI 時僅顯示 AI 結果
-    final_df = pd.DataFrame(st.session_state.ai_results)
-else:
-    # 否則顯示原始資料
-    final_df = filtered_df.copy()
-
-if not final_df.empty:
-    # 統一計算距離
-    final_df["距離(km)"] = final_df.apply(
+# 計算距離
+if not filtered_df.empty:
+    filtered_df["距離(km)"] = filtered_df.apply(
         lambda r: round(geodesic(center_coords, (r["緯度"], r["經度"])).km, 2), axis=1
     )
-    # 距離近者優先排序
-    final_df = final_df.sort_values("距離(km)")
+    # 僅顯示 10km 內的景點以維持流暢度 (可視需求調整)
+    filtered_df = filtered_df.sort_values("距離(km)")
 
-# 清除 AI 按鈕
-if st.session_state.ai_results:
-    if st.sidebar.button("🗑️ 清除 AI 搜尋結果"):
-        st.session_state.ai_results = []
-        st.rerun()
+# --- 4. 渲染全螢幕地圖 ---
+st.title(f"📍 {city_filter} 親子旅遊圖釘地圖")
+st.markdown("💡 **操作提示**：點擊地圖上的**藍色/綠色圖釘**，即可直接查看該景點的詳細介紹與距離。")
 
-# --- 4. 渲染頁面 ---
-st.title(f"📍 {city_filter} 親子旅遊查詢系統")
+# 建立地圖物件
+m = folium.Map(location=center_coords, zoom_start=14, control_scale=True)
 
-col1, col2 = st.columns([2, 1])
+# 標記中心位置 (家/起點)
+folium.Marker(
+    center_coords, 
+    popup="我的位置", 
+    icon=folium.Icon(color="red", icon="home")
+).add_to(m)
 
-with col1:
-    m = folium.Map(location=center_coords, zoom_start=14) # 範圍縮小，預設 Zoom 改 14
-    folium.Marker(center_coords, popup="我的位置", icon=folium.Icon(color="red", icon="home")).add_to(m)
+# 繪製 2KM 視覺圈
+folium.Circle(
+    radius=2000,
+    location=center_coords,
+    color="crimson",
+    fill=True,
+    fill_color="crimson",
+    fill_opacity=0.05
+).add_to(m)
+
+# 標記所有符合條件的景點
+for _, row in filtered_df.iterrows():
+    pin_color = "blue" if row["來源"] == "政府公開資料" else "green"
     
-    # 畫出 2KM 的視覺化圓圈
-    folium.Circle(
-        radius=2000,
-        location=center_coords,
-        color="crimson",
-        fill=True,
-        fill_color="crimson",
-        fill_opacity=0.1
+    # 建立彈出視窗的 HTML 內容，優化閱讀排版
+    popup_html = f"""
+    <div style="width: 250px; font-family: sans-serif;">
+        <h4 style="margin-bottom: 5px; color: #1f77b4;">{row['名稱']}</h4>
+        <p style="margin: 0; font-size: 0.9em; color: #555;"><b>距離：</b>{row['距離(km)']} km</p>
+        <hr style="margin: 10px 0;">
+        <div style="max-height: 150px; overflow-y: auto; font-size: 0.85em; line-height: 1.4;">
+            {row['介紹']}
+        </div>
+    </div>
+    """
+    
+    folium.Marker(
+        [row["緯度"], row["經度"]],
+        popup=folium.Popup(popup_html, max_width=300),
+        icon=folium.Icon(color=pin_color, icon="info-sign"),
+        tooltip=row['名稱'] # 滑鼠移上去會顯示名稱
     ).add_to(m)
-    
-    for _, row in final_df.iterrows():
-        src = row.get("來源", "政府公開資料")
-        pin_color = "orange" if src == "AI 智慧推薦" else "blue"
-        if src == "社群回報資料": pin_color = "green"
-            
-        popup_content = f"<b>{row['名稱']}</b><br>距離: {row['距離(km)']} km"
-        folium.Marker(
-            [row["緯度"], row["經度"]],
-            popup=folium.Popup(popup_content, max_width=200),
-            icon=folium.Icon(color=pin_color, icon="info-sign")
-        ).add_to(m)
-        
-    st_folium(m, width="100%", height=600, key="main_map")
 
-with col2:
-    mode_text = "✨ AI 推薦 (2KM 內)" if (use_ai and st.session_state.ai_results) else "📋 原始資料清單"
-    st.subheader(mode_text)
-    if not final_df.empty:
-        st.dataframe(final_df[["名稱", "距離(km)"]], use_container_width=True, hide_index=True)
-    else:
-        st.info("無相符景點。")
+# 顯示地圖，將高度調大
+st_folium(m, width="100%", height=800, returned_objects=[])
+
+# 頁尾說明
+st.caption(f"目前顯示 {len(filtered_df)} 個景點。資料來源：交通部觀光署公開資料庫、社群協作表格。")
