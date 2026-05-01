@@ -121,15 +121,6 @@ if raw_coords is None:
 else:
     center_coords = raw_coords
 
-# ... (後面其餘程式碼保持不變)
-
-# 獲取中心座標
-center_coords = get_coordinates(target_address)
-
-# 載入與篩選資料
-poi_df = load_base_data()
-filtered_df = poi_df[poi_df["縣市"] == city_filter].copy()
-
 if keyword:
     search_key = keyword.replace("台", "臺")
     filtered_df = filtered_df[filtered_df["名稱"].str.contains(search_key, na=False)]
