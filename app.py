@@ -74,7 +74,6 @@ def load_all_data():
     SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSTCgMNKX0_D5fre8tFYOE32i_9ikAwx7yOlz5nl0fMbhPVfIQHU32-l2y_jUe1mAInQhlB0ia_A6hy/pub?output=csv"
     try:
         sheet_df = pd.read_csv(SHEET_URL)
-        # 修正社群資料欄位名稱不一致的問題
         if 'lat' in sheet_df.columns: sheet_df.rename(columns={'lat': '緯度'}, inplace=True)
         if 'lng' in sheet_df.columns: sheet_df.rename(columns={'lng': '經度'}, inplace=True)
         
@@ -86,7 +85,6 @@ def load_all_data():
 
     df = pd.DataFrame(all_pois)
     if not df.empty:
-        # 強制轉換經緯度為數字，並刪除無效座標
         df['緯度'] = pd.to_numeric(df['緯度'], errors='coerce')
         df['經度'] = pd.to_numeric(df['經度'], errors='coerce')
         df = df.dropna(subset=['緯度', '經度'])
@@ -118,8 +116,6 @@ if st.sidebar.button("確認定位"):
 st.sidebar.markdown("---")
 city_list = sorted(list(poi_df['縣市'].unique()))
 selected_city = st.sidebar.selectbox("2. 選擇篩選縣市", city_list, index=city_list.index("臺北市") if "臺北市" in city_list else 0)
-
-# 關鍵字過濾
 keyword = st.sidebar.text_input("3. 景點關鍵字搜尋")
 
 # --- 5. 資料處理與距離計算 ---
@@ -136,21 +132,11 @@ if not filtered_df.empty:
 # --- 6. 渲染介面 ---
 st.title(f"📍 {selected_city} 親子旅遊地圖")
 
-# 顯示地圖
 m = folium.Map(location=st.session_state.center_coords, zoom_start=14, control_scale=True)
+folium.Marker(st.session_state.center_coords, popup="我的中心點", icon=folium.Icon(color="red", icon="star")).add_to(m)
 
-# 標記中心點
-folium.Marker(
-    st.session_state.center_coords, 
-    popup="我的中心點", 
-    icon=folium.Icon(color="red", icon="star")
-).add_to(m)
-
-# 解決問題 1：確保循環正確加入所有圖釘
 for _, row in filtered_df.iterrows():
-    # 根據來源決定顏色
     color = "blue" if row["來源"] == "政府公開資料" else "green"
-    
     folium.Marker(
         location=[row["緯度"], row["經度"]],
         popup=folium.Popup(f"<b>{row['名稱']}</b><br>距離: {row['距離(km)']}km<br>{row['介紹']}", max_width=300),
@@ -158,22 +144,20 @@ for _, row in filtered_df.iterrows():
         icon=folium.Icon(color=color, icon="info-sign")
     ).add_to(m)
 
+# 修正處：改用較穩定的邏輯拆解，避免 SyntaxError
 map_data = st_folium(m, width="100%", height=500, returned_objects=["last_clicked"])
 
-# 處理地圖點擊
-if map_data and map_output := map_data.get("last_clicked"):
-    new_p = (map_output["lat"], map_output["lng"])
-    if new_p != st.session_state.center_coords:
-        st.session_state.center_coords = new_p
-        st.rerun()
+if map_data is not None:
+    last_clicked = map_data.get("last_clicked")
+    if last_clicked is not None:
+        new_lat = last_clicked.get("lat")
+        new_lng = last_clicked.get("lng")
+        if (new_lat, new_lng) != st.session_state.center_coords:
+            st.session_state.center_coords = (new_lat, new_lng)
+            st.rerun()
 
-# 顯示推薦清單
 st.subheader("🏠 距離最近的景點 Top 10")
 if not filtered_df.empty:
-    st.dataframe(
-        filtered_df[["名稱", "距離(km)", "來源", "介紹"]].head(10),
-        use_container_width=True,
-        hide_index=True
-    )
+    st.dataframe(filtered_df[["名稱", "距離(km)", "來源", "介紹"]].head(10), use_container_width=True, hide_index=True)
 else:
     st.warning("查無符合條件的景點。")
