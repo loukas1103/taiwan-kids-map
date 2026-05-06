@@ -11,7 +11,7 @@ from geopy.distance import geodesic
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 設定頁面配置
-st.set_page_config(layout="wide", page_title="全台親子旅遊地圖-手動定位版")
+st.set_page_config(layout="wide", page_title="全台親子旅遊地圖 (Google定位版)")
 
 # --- 1. 高效率資料匯入與快取 ---
 @st.cache_data(ttl=3600)
@@ -25,6 +25,7 @@ def load_base_data():
     ]
 
     try:
+        # 政府公開資料
         gov_url = "https://media.taiwan.net.tw/XMLReleaseALL_public/scenic_spot_C_f.xml"
         response = requests.get(gov_url, timeout=15, verify=False)
         response.encoding = 'utf-8'
@@ -82,23 +83,50 @@ def load_base_data():
         df = df.dropna(subset=['緯度', '經度'])
     return df
 
-# --- 2. 初始化 Session State (儲存點擊的位置) ---
-if 'center_coords' not in st.session_state:
-    # 預設位置 (台北車站)
-    st.session_state.center_coords = (25.0478, 121.5170)
+# --- 2. Google Maps 地理編碼函數 ---
+@st.cache_data(ttl=86400)
+def get_coordinates_google(address, api_key):
+    """使用 Google Maps Geocoding API 轉換地址為經緯度"""
+    if not api_key:
+        return (25.0478, 121.5170)  # 無 API Key 時回傳台北車站
+    
+    base_url = "https://maps.googleapis.com/maps/api/geocode/json"
+    params = {
+        "address": address,
+        "key": api_key,
+        "language": "zh-TW"
+    }
+    
+    try:
+        response = requests.get(base_url, params=params)
+        data = response.json()
+        if data['status'] == 'OK':
+            lat = data['results'][0]['geometry']['location']['lat']
+            lng = data['results'][0]['geometry']['location']['lng']
+            return (lat, lng)
+        else:
+            st.sidebar.warning(f"Google 定位失敗: {data['status']}")
+    except Exception as e:
+        st.sidebar.error(f"API 連線錯誤: {e}")
+        
+    return (25.0478, 121.5170)
 
-# --- 3. 介面與篩選邏輯 ---
-st.sidebar.header("📍 定位與篩選")
-st.sidebar.info("💡 **手動定位**：在右側地圖上**任意位置點擊一下**，紅色的中心標記就會跳轉到該處，並重新計算景點距離。")
+# --- 3. 介面與搜尋邏輯 ---
+st.sidebar.header("⚙️ 設定與搜尋")
 
-TAIWAN_CITIES = ["宜蘭縣", "臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市", "新竹市", "新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義市", "嘉義縣", "屏東縣", "花蓮縣", "臺東縣"]
-city_filter = st.sidebar.selectbox("1. 選擇縣市", TAIWAN_CITIES)
-keyword = st.sidebar.text_input("2. 景點名稱關鍵字")
+# 在側邊欄讓使用者輸入 API Key
+google_api_key = st.sidebar.text_input("輸入 Google API Key", type="password", help="請至 Google Cloud Console 申請 Geocoding API Key")
 
-# 重置按鈕
-if st.sidebar.button("重置回預設位置"):
-    st.session_state.center_coords = (25.0478, 121.5170)
-    st.rerun()
+target_address = st.sidebar.text_input("1. 輸入您的中心位置", "台北車站")
+
+TAIWAN_CITIES = ["臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市", "新竹市", "新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義市", "嘉義縣", "屏東縣", "宜蘭縣", "花蓮縣", "臺東縣"]
+city_filter = st.sidebar.selectbox("2. 選擇縣市", TAIWAN_CITIES)
+keyword = st.sidebar.text_input("3. 景點名稱關鍵字")
+
+# 獲取中心座標 (改用 Google API)
+if not google_api_key:
+    st.info("💡 提示：請在左側輸入 Google API Key 以啟用精準地址搜尋。目前使用預設位置。")
+center_coords = get_coordinates_google(target_address, google_api_key)
 
 # 載入與篩選資料
 poi_df = load_base_data()
@@ -111,59 +139,56 @@ if keyword:
 # 計算距離
 if not filtered_df.empty:
     filtered_df["距離(km)"] = filtered_df.apply(
-        lambda r: round(geodesic(st.session_state.center_coords, (r["緯度"], r["經度"])).km, 2), axis=1
+        lambda r: round(geodesic(center_coords, (r["緯度"], r["經度"])).km, 2), axis=1
     )
     filtered_df = filtered_df.sort_values("距離(km)")
 
 # --- 4. 渲染地圖 ---
-st.title(f"📍 {city_filter} 親子旅遊地圖")
-st.write(f"當前中心座標：{st.session_state.center_coords[0]:.5f}, {st.session_state.center_coords[1]:.5f} (點擊地圖可更換位置)")
+st.title(f"📍 {city_filter} 親子旅遊圖釘地圖")
 
 # 建立地圖物件
-# 注意：location 使用當前的 session_state
-m = folium.Map(location=st.session_state.center_coords, zoom_start=13, control_scale=True)
+m = folium.Map(location=center_coords, zoom_start=14, control_scale=True)
 
-# 標記中心位置 (紅色星星)
+# 標記中心位置 (家/起點)
 folium.Marker(
-    st.session_state.center_coords, 
-    popup="我的中心點", 
-    icon=folium.Icon(color="red", icon="star")
+    center_coords, 
+    popup=f"搜尋中心: {target_address}", 
+    icon=folium.Icon(color="red", icon="home")
 ).add_to(m)
 
-# 標記符合條件的景點
+# 繪製 2KM 視覺圈
+folium.Circle(
+    radius=2000,
+    location=center_coords,
+    color="crimson",
+    fill=True,
+    fill_color="crimson",
+    fill_opacity=0.05
+).add_to(m)
+
+# 標記所有符合條件的景點
 for _, row in filtered_df.iterrows():
     pin_color = "blue" if row["來源"] == "政府公開資料" else "green"
-    popup_html = f"<b>{row['名稱']}</b><br>距離：{row['距離(km)']} km<hr>{row['介紹']}"
+    
+    popup_html = f"""
+    <div style="width: 250px; font-family: sans-serif;">
+        <h4 style="margin-bottom: 5px; color: #1f77b4;">{row['名稱']}</h4>
+        <p style="margin: 0; font-size: 0.9em; color: #555;"><b>距離：</b>{row['距離(km)']} km</p>
+        <hr style="margin: 10px 0;">
+        <div style="max-height: 150px; overflow-y: auto; font-size: 0.85em; line-height: 1.4;">
+            {row['介紹']}
+        </div>
+    </div>
+    """
     
     folium.Marker(
         [row["緯度"], row["經度"]],
-        popup=folium.Popup(popup_html, max_width=250),
+        popup=folium.Popup(popup_html, max_width=300),
         icon=folium.Icon(color=pin_color, icon="info-sign"),
         tooltip=row['名稱']
     ).add_to(m)
 
-# 顯示地圖並捕捉點擊事件
-# returned_objects=["last_clicked"] 是關鍵，這會回傳滑鼠點擊的座標
-map_data = st_folium(
-    m, 
-    width="100%", 
-    height=600, 
-    returned_objects=["last_clicked"]
-)
+# 顯示地圖
+st_folium(m, width="100%", height=800, returned_objects=[])
 
-# --- 5. 處理點擊事件並更新座標 ---
-if map_data and map_data["last_clicked"]:
-    clicked_lat = map_data["last_clicked"]["lat"]
-    clicked_lng = map_data["last_clicked"]["lng"]
-    
-    # 檢查是否與現有座標不同，避免無限循環重新渲染
-    if (clicked_lat, clicked_lng) != st.session_state.center_coords:
-        st.session_state.center_coords = (clicked_lat, clicked_lng)
-        st.rerun() # 強制重新執行，更新距離計算與列表
-
-# --- 6. 顯示結果列表 ---
-st.subheader(f"🏠 距離最近的景點 (Top 10)")
-if not filtered_df.empty:
-    st.table(filtered_df[["名稱", "距離(km)", "介紹"]].head(10))
-else:
-    st.warning("此區域尚無符合條件的景點。")
+st.caption(f"目前顯示 {len(filtered_df)} 個景點。資料來源：交通部觀光署公開資料庫。")
