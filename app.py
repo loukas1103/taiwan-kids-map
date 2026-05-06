@@ -108,6 +108,17 @@ def get_coordinates_google(address):
             return (location['lat'], location['lng'])
         else:
             st.sidebar.error(f"Google 定位失敗: {data['status']}")
+            
+    # 修改這一段來 debug
+if data['status'] == 'OK':
+    location = data['results'][0]['geometry']['location']
+    return (location['lat'], location['lng'])
+else:
+    # 這裡會顯示 Google 回傳的具體錯誤原因 (error_message)
+    error_msg = data.get('error_message', '無具體錯誤原因')
+    st.sidebar.error(f"Google 定位失敗: {data['status']}")
+    st.sidebar.write(f"詳細原因: {error_msg}")
+    
     except Exception as e:
         st.sidebar.error(f"API 連線異常: {e}")
     
