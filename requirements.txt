@@ -8,3 +8,4 @@ oauth2client
 requests
 google-generativeai>=0.7.0
 urllib3
+googlemaps
