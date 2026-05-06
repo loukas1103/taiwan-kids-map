@@ -107,7 +107,7 @@ poi_df = load_all_data()
 
 # --- 4. 側邊欄 ---
 st.sidebar.header("🗺️ 搜尋與導航")
-search_query = st.sidebar.text_input("1. 輸入地址/地標自動定位", placeholder="例如：新北市中和區光華街6")
+search_query = st.sidebar.text_input("1. 輸入地址/地標自動定位", placeholder="例如：台北火車站、台北市大安區...")
 if st.sidebar.button("確認定位"):
     if search_query:
         try:
