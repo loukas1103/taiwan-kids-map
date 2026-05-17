@@ -42,7 +42,6 @@ def load_all_data():
                 name = info.find('Name').text.strip() if info.find('Name') is not None else "未知景點"
                 add = info.find('Add').text.strip() if info.find('Add') is not None and info.find('Add').text else ""
                 reg = info.find('Region').text.strip() if info.find('Region') is not None and info.find('Region').text else ""
-                desc = info.find('Toldescribe').text.strip() if info.find('Toldescribe') is not None else "暫無介紹"
                 
                 px_val = info.find('Px').text
                 py_val = info.find('Py').text
@@ -64,8 +63,7 @@ def load_all_data():
                         found_city = "臺北市"
 
                     all_pois.append({
-                        "名稱": name, "縣市": found_city, "緯度": py, "經度": px,
-                        "介紹": desc, "來源": "政府公開資料"
+                        "名稱": name, "縣市": found_city, "緯度": py, "經度": px, "來源": "政府公開資料"
                     })
             except: continue
     except Exception as e:
@@ -84,8 +82,10 @@ def load_all_data():
                 return "其他"
             sheet_df['縣市'] = sheet_df['縣市'].apply(clean_city)
             sheet_df['來源'] = "社群回報資料"
-            if '介紹' not in sheet_df.columns: sheet_df['介紹'] = "社群好友推薦景點"
-            all_pois.extend(sheet_df.to_dict('records'))
+            
+            # 只保留需要的欄位避免混入原本的介紹資訊
+            keep_cols = [c for c in ['名稱', '縣市', '緯度', '經度', '來源'] if c in sheet_df.columns]
+            all_pois.extend(sheet_df[keep_cols].to_dict('records'))
     except: pass
 
     df = pd.DataFrame(all_pois)
@@ -151,7 +151,7 @@ st.title(f"📍 {st.session_state.selected_city} 親子旅遊地圖")
 # 建立地圖
 m = folium.Map(location=st.session_state.center_coords, zoom_start=15, control_scale=True)
 
-# 定位中心點：使用大型紅色星號，不含閃爍動畫
+# 定位中心點
 folium.Marker(
     st.session_state.center_coords, 
     popup="<b>📍 我的定位中心</b>", 
@@ -164,20 +164,18 @@ for _, row in filtered_df.iterrows():
     # 區隔來源顏色
     icon_color = "green" if row["來源"] == "社群回報資料" else "blue"
     
-    # 彈出視窗 HTML：包含名稱、距離、來源、介紹
+    # 彈出視窗 HTML：僅保留名稱、距離與來源
     popup_html = f"""
-    <div style='width:250px; font-family: sans-serif;'>
+    <div style='width:200px; font-family: sans-serif;'>
         <h4 style='margin-bottom:5px; color:#1f77b4;'>{row['名稱']}</h4>
         <p style='margin:2px 0;'><b>📏 距離中心：</b>{row['距離(km)']} km</p>
         <p style='margin:2px 0;'><b>🏷️ 來源：</b>{row['來源']}</p>
-        <hr style='margin:10px 0;'>
-        <p style='font-size:13px; color:#555; line-height:1.4;'>{row['介紹']}</p>
     </div>
     """
     
     folium.Marker(
         location=[row["緯度"], row["經度"]],
-        popup=folium.Popup(popup_html, max_width=300),
+        popup=folium.Popup(popup_html, max_width=250),
         tooltip=row["名稱"],
         icon=folium.Icon(color=icon_color, icon="info-sign")
     ).add_to(m)
@@ -185,4 +183,4 @@ for _, row in filtered_df.iterrows():
 # 渲染地圖
 st_folium(m, width="100%", height=750, returned_objects=[])
 
-st.info("💡 提示：點擊圖釘可查看詳細介紹與距離。藍色為政府資料，綠色為社群推薦。")
+st.info("💡 提示：點擊圖釘可查看景點名稱與距離。藍色為政府資料，綠色為社群推薦。")
