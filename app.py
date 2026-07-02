@@ -39,19 +39,17 @@ def load_all_data():
             
         json_filename = os.path.join(current_dir, "AttractionList.json")
     except:
-        json_filename = "AttractionList.json" # 萬一路徑計算全垮，退回最基礎的相對路徑
+        json_filename = "AttractionList.json"
     
     if os.path.exists(json_filename):
         try:
             with open(json_filename, 'r', encoding='utf-8') as f:
                 raw_data = json.load(f)
                 
-            # 依據新版結構，景點資料存放在 "Attractions" 鍵值中
             data_list = raw_data.get("Attractions", [])
                 
             for item in data_list:
                 try:
-                    # 1. 安全取得經緯度，避免 KeyError 崩潰
                     px_val = item.get('PositionLon', None)
                     py_val = item.get('PositionLat', None)
                     
@@ -61,11 +59,9 @@ def load_all_data():
                     px = float(px_val)
                     py = float(py_val)
                     
-                    # 2. 處理景點名稱
                     name = item.get('AttractionName', '')
                     name = name.strip() if isinstance(name, str) else "未知景點"
                     
-                    # 3. 處理縣市欄位 (解決 List 階層)
                     city_data = item.get('LocatedCities', '')
                     if isinstance(city_data, list):
                         city_val = "".join(city_data) 
@@ -73,11 +69,9 @@ def load_all_data():
                         city_val = str(city_data)
                     city_val = city_val.strip()
                     
-                    # 4. 處理地址
                     address = item.get('PostalAddress', '')
                     address = address.strip() if isinstance(address, str) else ""
                     
-                    # 5. 統一台/臺並進行縣市判斷
                     search_str = (name + city_val + address).replace("台北", "臺北").replace("台中", "臺中").replace("台南", "臺南").replace("台東", "臺東")
                     
                     found_city = "其他"
@@ -86,7 +80,6 @@ def load_all_data():
                             found_city = c
                             break
                     
-                    # 座標補位判斷 (臺北市範圍)
                     if found_city == "其他" and 24.96 <= py <= 25.21 and 121.45 <= px <= 121.67:
                         found_city = "臺北市"
 
@@ -95,13 +88,13 @@ def load_all_data():
                             "名稱": name, "縣市": found_city, "緯度": py, "經度": px, "來源": "政府公開資料"
                         })
                 except: 
-                    continue # 單一景點格式有瑕疵直接略過
+                    continue
         except Exception as e:
             st.sidebar.error(f"❌ 本地 JSON 解析失敗: {e}")
     else:
         st.sidebar.warning(f"⚠️ 找不到本地檔案 `AttractionList.json`，請確認是否與 app.py 放在同一個目錄下。")
 
-    # B. 社群回報資料 (保留線上 Google 試算表)
+    # B. 社群回報資料
     SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSTCgMNKX0_D5fre8tFYOE32i_9ikAwx7yOlz5nl0fMbhPVfIQHU32-l2y_jUe1mAInQhlB0ia_A6hy/pub?output=csv"
     try:
         sheet_df = pd.read_csv(SHEET_URL)
@@ -127,7 +120,7 @@ def load_all_data():
         df = df[df['縣市'].isin(STANDARD_CITIES)]
     return df
 
-# --- 3. 初始化 Session State ---
+# --- 3. 初始化 Session State (確保此處開始皆靠最左邊，無縮排) ---
 if 'center_coords' not in st.session_state:
     st.session_state.center_coords = (25.0478, 121.5170)
 if 'selected_city' not in st.session_state:
@@ -187,7 +180,6 @@ st.title(f"📍 {st.session_state.selected_city} 親子旅遊地圖")
 
 m = folium.Map(location=st.session_state.center_coords, zoom_start=15, control_scale=True)
 
-# 定位中心點
 folium.Marker(
     st.session_state.center_coords, 
     popup="<b>📍 我的定位中心</b>", 
@@ -195,7 +187,6 @@ folium.Marker(
     icon=folium.Icon(color="red", icon="star", prefix="fa")
 ).add_to(m)
 
-# 標記景點圖釘
 if not filtered_df.empty:
     for _, row in filtered_df.iterrows():
         icon_color = "green" if row["來源"] == "社群回報資料" else "blue"
@@ -215,7 +206,6 @@ if not filtered_df.empty:
             icon=folium.Icon(color=icon_color, icon="info-sign")
         ).add_to(m)
 
-# 渲染地圖
 st_folium(m, width="100%", height=750, returned_objects=[])
 
 if filtered_df.empty:
