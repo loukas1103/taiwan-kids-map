@@ -11,6 +11,9 @@ from geopy.distance import geodesic
 # 消除必要的 SSL 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# 💡 關鍵修正：必須是第一個執行的 Streamlit 命令
+st.set_page_config(layout="wide", page_title="全台親子旅遊地圖")
+
 # --- 1. 安全讀取 API Key ---
 def get_google_api_key():
     if "GOOGLE_MAPS_API_KEY" in st.secrets:
@@ -20,9 +23,6 @@ def get_google_api_key():
         st.stop()
 
 GOOGLE_MAPS_API_KEY = get_google_api_key()
-
-# 設定頁面配置
-st.set_page_config(layout="wide", page_title="全台親子旅遊地圖")
 
 # --- 2. 資料清洗與標準化 ---
 @st.cache_data(ttl=3600)
@@ -120,7 +120,7 @@ def load_all_data():
         df = df[df['縣市'].isin(STANDARD_CITIES)]
     return df
 
-# --- 3. 初始化 Session State (確保此處開始皆靠最左邊，無縮排) ---
+# --- 3. 初始化 Session State ---
 if 'center_coords' not in st.session_state:
     st.session_state.center_coords = (25.0478, 121.5170)
 if 'selected_city' not in st.session_state:
@@ -183,7 +183,7 @@ m = folium.Map(location=st.session_state.center_coords, zoom_start=15, control_s
 folium.Marker(
     st.session_state.center_coords, 
     popup="<b>📍 我的定位中心</b>", 
-    tooltip="目前定位點",
+    tooltip="目中心點",
     icon=folium.Icon(color="red", icon="star", prefix="fa")
 ).add_to(m)
 
