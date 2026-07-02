@@ -30,24 +30,29 @@ def load_all_data():
     all_pois = []
     STANDARD_CITIES = ["臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市", "基隆市", "新竹縣", "新竹市", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義縣", "嘉義市", "屏東縣", "宜蘭縣", "花蓮縣", "臺東縣", "澎湖縣", "金門縣", "連江縣"]
 
-    # A. 讀取本地新版政府 JSON 資料
-    json_filename = "AttractionList.json"
+    # A. 讀取本地新版政府 JSON 資料 (使用絕對路徑定位防錯)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    json_filename = os.path.join(current_dir, "AttractionList.json")
     
     if os.path.exists(json_filename):
         try:
             with open(json_filename, 'r', encoding='utf-8') as f:
-                data_list = json.load(f)
+                raw_data = json.load(f)
+                
+            # 💡 依據新版結構，景點資料存放在 "Attractions" 鍵值中
+            data_list = raw_data.get("Attractions", [])
                 
             for item in data_list:
                 try:
-                    name = item.get('Name', '').strip() if item.get('Name') else "未知景點"
-                    city_val = item.get('City', '').strip() if item.get('City') else ""
-                    address = item.get('Address', '').strip() if item.get('Address') else ""
+                    # 💡 依據新版欄位規格重新對齊
+                    name = item.get('AttractionName', '').strip() if item.get('AttractionName') else "未知景點"
+                    city_val = item.get('LocatedCities', '').strip() if item.get('LocatedCities') else ""
+                    address = item.get('PostalAddress', '').strip() if item.get('PostalAddress') else ""
                     
-                    px_val = item.get('Longitude')
-                    py_val = item.get('Latitude')
+                    px_val = item.get('PositionLon')
+                    py_val = item.get('PositionLat')
                     
-                    if px_val and py_val:
+                    if px_val is not None and py_val is not None:
                         px = float(px_val)
                         py = float(py_val)
                         
@@ -72,7 +77,7 @@ def load_all_data():
         except Exception as e:
             st.sidebar.error(f"❌ 本地 JSON 解析失敗: {e}")
     else:
-        st.sidebar.warning(f"⚠️ 找不到本地檔案 `{json_filename}`，目前僅以社群資料運作。")
+        st.sidebar.warning(f"⚠️ 找不到本地檔案 `AttractionList.json`，請確認是否與 app.py 放在同一個目錄下。")
 
     # B. 社群回報資料 (保留線上 Google 試算表)
     SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSTCgMNKX0_D5fre8tFYOE32i_9ikAwx7yOlz5nl0fMbhPVfIQHU32-l2y_jUe1mAInQhlB0ia_A6hy/pub?output=csv"
