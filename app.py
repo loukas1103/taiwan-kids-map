@@ -43,7 +43,7 @@ def load_all_data():
     
     if os.path.exists(json_filename):
         try:
-            with open(json_filename, 'r', encoding='utf-8') as f:
+            with open(json_filename, 'r', encoding='utf-8-sig') as f:
                 raw_data = json.load(f)
                 
             data_list = raw_data.get("Attractions", [])
