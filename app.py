@@ -30,9 +30,16 @@ def load_all_data():
     all_pois = []
     STANDARD_CITIES = ["臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市", "基隆市", "新竹縣", "新竹市", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義縣", "嘉義市", "屏東縣", "宜蘭縣", "花蓮縣", "臺東縣", "澎湖縣", "金門縣", "連江縣"]
 
-    # A. 讀取本地新版政府 JSON 資料 (使用絕對路徑定位防錯)
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    json_filename = os.path.join(current_dir, "AttractionList.json")
+    # A. 讀取本地新版政府 JSON 資料 (加入雙重安全路徑判斷)
+    try:
+        if "__file__" in globals() and __file__ is not None:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+        else:
+            current_dir = os.getcwd()
+            
+        json_filename = os.path.join(current_dir, "AttractionList.json")
+    except:
+        json_filename = "AttractionList.json" # 萬一路徑計算全垮，退回最基礎的相對路徑
     
     if os.path.exists(json_filename):
         try:
@@ -212,3 +219,6 @@ if not filtered_df.empty:
 st_folium(m, width="100%", height=750, returned_objects=[])
 
 if filtered_df.empty:
+    st.info("💡 目前選擇的縣市或關鍵字查無景點資料。")
+else:
+    st.info("💡 提示：點擊圖釘可查看景點名稱與距離。藍色為政府資料，綠色為社群推薦。")
