@@ -11,7 +11,7 @@ from geopy.distance import geodesic
 # 消除必要的 SSL 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 💡 關鍵修正：必須是第一個執行的 Streamlit 命令
+# 必須是第一個執行的 Streamlit 命令
 st.set_page_config(layout="wide", page_title="全台親子旅遊地圖")
 
 # --- 1. 安全讀取 API Key ---
@@ -183,7 +183,7 @@ m = folium.Map(location=st.session_state.center_coords, zoom_start=15, control_s
 folium.Marker(
     st.session_state.center_coords, 
     popup="<b>📍 我的定位中心</b>", 
-    tooltip="目中心點",
+    tooltip="中心定位點",
     icon=folium.Icon(color="red", icon="star", prefix="fa")
 ).add_to(m)
 
