@@ -44,49 +44,51 @@ def load_all_data():
                 
             for item in data_list:
                 try:
-                    # 1. 處理景點名稱
+                    # 1. 安全取得經緯度，避免 KeyError 崩潰
+                    px_val = item.get('PositionLon', None)
+                    py_val = item.get('PositionLat', None)
+                    
+                    if px_val is None or py_val is None or px_val == "" or py_val == "":
+                        continue
+                        
+                    px = float(px_val)
+                    py = float(py_val)
+                    
+                    # 2. 處理景點名稱
                     name = item.get('AttractionName', '')
                     name = name.strip() if isinstance(name, str) else "未知景點"
                     
-                    # 2. 處理縣市欄位 (解決 List 導致的屬性錯誤)
+                    # 3. 處理縣市欄位 (解決 List 階層)
                     city_data = item.get('LocatedCities', '')
                     if isinstance(city_data, list):
-                        city_val = "".join(city_data) # 把 ['臺南市'] 轉成 '臺南市'
+                        city_val = "".join(city_data) 
                     else:
                         city_val = str(city_data)
                     city_val = city_val.strip()
                     
-                    # 3. 處理地址
+                    # 4. 處理地址
                     address = item.get('PostalAddress', '')
                     address = address.strip() if isinstance(address, str) else ""
                     
-                    # 4. 處理經緯度 (加入防禦，防範缺失或空字串)
-                    px_val = item.get('PositionLon')
-                    py_val = item.get('PositionLat')
+                    # 5. 統一台/臺並進行縣市判斷
+                    search_str = (name + city_val + address).replace("台北", "臺北").replace("台中", "臺中").replace("台南", "臺南").replace("台東", "臺東")
                     
-                    if px_val is not None and py_val is not None and px_val != "" and py_val != "":
-                        px = float(px_val)
-                        py = float(py_val)
-                        
-                        # 統一台/臺並進行縣市判斷
-                        search_str = (name + city_val + address).replace("台北", "臺北").replace("台中", "臺中").replace("台南", "臺南").replace("台東", "臺東")
-                        
-                        found_city = "其他"
-                        for c in STANDARD_CITIES:
-                            if c in search_str:
-                                found_city = c
-                                break
-                        
-                        # 座標補位判斷 (臺北市範圍)
-                        if found_city == "其他" and 24.96 <= py <= 25.21 and 121.45 <= px <= 121.67:
-                            found_city = "臺北市"
+                    found_city = "其他"
+                    for c in STANDARD_CITIES:
+                        if c in search_str:
+                            found_city = c
+                            break
+                    
+                    # 座標補位判斷 (臺北市範圍)
+                    if found_city == "其他" and 24.96 <= py <= 25.21 and 121.45 <= px <= 121.67:
+                        found_city = "臺北市"
 
-                        if found_city in STANDARD_CITIES:
-                            all_pois.append({
-                                "名稱": name, "縣市": found_city, "緯度": py, "經度": px, "來源": "政府公開資料"
-                            })
-                except Exception as inner_e: 
-                    continue # 某一筆有瑕疵則跳過，不影響大局
+                    if found_city in STANDARD_CITIES:
+                        all_pois.append({
+                            "名稱": name, "縣市": found_city, "緯度": py, "經度": px, "來源": "政府公開資料"
+                        })
+                except: 
+                    continue # 單一景點格式有瑕疵直接略過
         except Exception as e:
             st.sidebar.error(f"❌ 本地 JSON 解析失敗: {e}")
     else:
@@ -210,6 +212,3 @@ if not filtered_df.empty:
 st_folium(m, width="100%", height=750, returned_objects=[])
 
 if filtered_df.empty:
-    st.info("💡 目前選擇的縣市或關鍵字查無景點資料。")
-else:
-    st.info("💡 提示：點擊圖釘可查看景點名稱與距離。藍色為政府資料，綠色為社群推薦。")
