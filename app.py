@@ -39,20 +39,32 @@ def load_all_data():
             with open(json_filename, 'r', encoding='utf-8') as f:
                 raw_data = json.load(f)
                 
-            # 💡 依據新版結構，景點資料存放在 "Attractions" 鍵值中
+            # 依據新版結構，景點資料存放在 "Attractions" 鍵值中
             data_list = raw_data.get("Attractions", [])
                 
             for item in data_list:
                 try:
-                    # 💡 依據新版欄位規格重新對齊
-                    name = item.get('AttractionName', '').strip() if item.get('AttractionName') else "未知景點"
-                    city_val = item.get('LocatedCities', '').strip() if item.get('LocatedCities') else ""
-                    address = item.get('PostalAddress', '').strip() if item.get('PostalAddress') else ""
+                    # 1. 處理景點名稱
+                    name = item.get('AttractionName', '')
+                    name = name.strip() if isinstance(name, str) else "未知景點"
                     
+                    # 2. 處理縣市欄位 (解決 List 導致的屬性錯誤)
+                    city_data = item.get('LocatedCities', '')
+                    if isinstance(city_data, list):
+                        city_val = "".join(city_data) # 把 ['臺南市'] 轉成 '臺南市'
+                    else:
+                        city_val = str(city_data)
+                    city_val = city_val.strip()
+                    
+                    # 3. 處理地址
+                    address = item.get('PostalAddress', '')
+                    address = address.strip() if isinstance(address, str) else ""
+                    
+                    # 4. 處理經緯度 (加入防禦，防範缺失或空字串)
                     px_val = item.get('PositionLon')
                     py_val = item.get('PositionLat')
                     
-                    if px_val is not None and py_val is not None:
+                    if px_val is not None and py_val is not None and px_val != "" and py_val != "":
                         px = float(px_val)
                         py = float(py_val)
                         
@@ -73,7 +85,8 @@ def load_all_data():
                             all_pois.append({
                                 "名稱": name, "縣市": found_city, "緯度": py, "經度": px, "來源": "政府公開資料"
                             })
-                except: continue
+                except Exception as inner_e: 
+                    continue # 某一筆有瑕疵則跳過，不影響大局
         except Exception as e:
             st.sidebar.error(f"❌ 本地 JSON 解析失敗: {e}")
     else:
